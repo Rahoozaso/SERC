@@ -1,0 +1,41 @@
+name: serc_env # Conda 환경 이름
+channels:
+  - defaults
+  - conda-forge
+  - pytorch # PyTorch 채널 추가
+  - nvidia  # CUDA 관련 패키지 채널 추가 (GPU 사용 시)
+dependencies:
+  # --- 기본 Python 및 핵심 도구 ---
+  - python=3.10
+  - pip
+  - pyyaml
+
+  # --- 데이터 처리 및 분석 ---
+  - pandas
+  - numpy
+  - scikit-learn
+  - nltk
+
+  # --- 개발 및 실험 환경 ---
+  - jupyterlab
+  - matplotlib
+  - seaborn
+  - tqdm
+
+  # --- PyTorch 및 CUDA (로컬 모델 실행 시, CUDA 11.8 기준) ---
+  # 채널 섹션에 이미 pytorch와 nvidia가 있으므로 여기서는 패키지만 명시
+  - pytorch::pytorch
+  - pytorch::torchvision
+  - pytorch::torchaudio
+  - pytorch-cuda=11.8 # PyTorch와 함께 설치될 CUDA 버전 지정
+
+  # --- pip 전용 패키지 ---
+  - pip:
+    # --- LLM API 클라이언트 ---
+    - openai
+    - anthropic # 필요하면 주석 해제
+
+    # --- Hugging Face 라이브러리 (로컬 모델 실행 시) ---
+    - transformers[torch]
+    - accelerate
+    - bitsandbytes # 선택 사항
