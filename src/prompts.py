@@ -67,3 +67,44 @@ REWRITE_SENTENCE_TEMPLATE = """[지시] 다음 [원본 문장]의 내용 중 [�
 [수정된 팩트]
 {correct_fact_text}
 [재작성된 문장] """
+
+# --- 6. CoVe (Chain-of-Verification) Baseline Prompts ---
+
+# 6.1. CoVe 2단계: 검증 계획 수립
+COVE_PLAN_PROMPT_TEMPLATE = """[지시]
+당신은 '초기 답변'의 사실적 정확성을 검증하는 것을 목표로 합니다.
+'초기 답변'을 읽고, '원본 질문'의 맥락에서 답변의 사실 여부를 확인하기 위해 필요한 **검증 질문(Verification Questions)** 목록을 생성하세요.
+각 질문은 답변의 특정 사실(인물, 장소, 날짜, 통계, 주장 등)을 확인하는 내용이어야 합니다.
+질문은 한 줄에 하나씩 작성하세요.
+
+[원본 질문]
+{query}
+
+[초기 답변]
+{baseline_response}
+
+[검증 질문 목록]
+"""
+
+# 6.2. CoVe 3단계: 검증 실행
+# (이 단계는 SERC의 VERIFICATION_ANSWER_TEMPLATE을 재사용할 수 있습니다.)
+# (별도로 정의할 필요 없이 main_serc.prompt_get_verification_answer 함수 호출)
+
+# 6.3. CoVe 4단계: 최종 답변 생성 (수정)
+COVE_REVISE_PROMPT_TEMPLATE = """[지시]
+당신은 '초기 답변'을 '검증 결과'를 바탕으로 수정하여 최종 답변을 생성해야 합니다.
+'초기 답변'의 내용 중 '검증 결과'와 모순되거나 사실이 아닌 부분을 수정하세요.
+검증 결과가 '초기 답변'의 내용을 뒷받침한다면, 해당 내용을 유지하세요.
+'원본 질문'에 대한 최종적이고 정확한 답변을 생성하세요.
+
+[원본 질문]
+{query}
+
+[초기 답변]
+{baseline_response}
+
+[검증 결과 (질문-답변 쌍)]
+{verification_evidence}
+
+[최종 수정된 답변]
+"""
