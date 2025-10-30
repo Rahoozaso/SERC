@@ -22,7 +22,6 @@ from src.data_loader import load_dataset # 수정된 data_loader 임포트
 # --- 베이스라인 임포트 (src/baselines 폴더 가정) ---
 # 나중에 구현 시 주석 해제
 # from src.baselines.cove import run_cove
-# from src.baselines.self_refine import run_self_refine
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -31,7 +30,6 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 def run_single_item(item: Dict[str, Any], method: str, model_name: str, config: Dict[str, Any],
                     t_max: Optional[int], max_facts: Optional[int]) -> Dict[str, Any]:
     """데이터셋의 단일 항목에 대해 지정된 방법론을 실행합니다."""
-    # 데이터셋 형식에 따라 'query' 또는 'question' 필드 사용
     query = item.get('question', item.get('query'))
     if not query:
         logging.warning("항목에서 'question' 또는 'query' 필드를 찾을 수 없음. 건너<0xEB><0x9B><0x8D>니다.")
@@ -86,9 +84,10 @@ def main():
     parser = argparse.ArgumentParser(description="Run SERC framework experiments.")
     # 프로젝트 루트 기준 기본 config 경로 설정
     default_config_path = os.path.join(PROJECT_ROOT, "configs", "config.yaml")
+    
+    # --- [수정됨] Argparse 인자 정의 (생략 부호 제거) ---
     parser.add_argument("--config", type=str, default=default_config_path,
                         help="Path to the configuration file.")
-    # 나머지 인자 정의 (변경 없음)
     parser.add_argument("--model", type=str, required=True,
                         help="Model name (must be defined in config file).")
     parser.add_argument("--dataset", type=str, required=True,
@@ -104,6 +103,8 @@ def main():
                         help="Override default MAX_FACTS_PER_GROUP for SERC.")
     parser.add_argument("--limit", type=int, default=None,
                         help="Limit the number of data points to process for testing.")
+    # --- [수정됨] 여기까지 ---
+    
     args = parser.parse_args()
 
     logging.info(f"실험 시작: Model={args.model}, Dataset={args.dataset}, Method={args.method}")
