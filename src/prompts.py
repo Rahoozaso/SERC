@@ -108,3 +108,9 @@ COVE_REVISE_PROMPT_TEMPLATE = """[지시]
 
 [최종 수정된 답변]
 """
+# --- 6. Ablation Study (Dense) Prompts ---
+GENERATE_QUESTION_FOR_ONE_FACT_TEMPLATE = """[지시] 다음 [사실]의 정확성을 직접적으로 검증할 수 있는 '의문문 1개'를 만드세요.
+(예: '그는 스페인에서 태어났다.' -> '그는 스페인에서 태어났는가?')
+[사실]
+{fact_text}
+[검증 질문] """
