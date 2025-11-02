@@ -5,18 +5,13 @@ import logging
 import csv
 from typing import List, Dict, Any
 
-# 다른 유틸리티 함수 임포트 (JSONL 로딩 등)
 try:
-    # 일반적인 실행 시 (예: experiments/run_experiment.py에서 호출)
     from .utils import load_jsonl, save_jsonl
 except ImportError:
-    # data_loader.py를 직접 실행하여 테스트할 때 상위 폴더(src)의 utils 임포트
     import sys
-    # 현재 파일(data_loader.py)의 상위 폴더(src)의 상위 폴더(프로젝트 루트)를 경로에 추가
     PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     if PROJECT_ROOT not in sys.path:
         sys.path.append(PROJECT_ROOT)
-    # 이제 src.utils 임포트 가능 (단, 테스트 블록용)
     from src.utils import load_jsonl, save_jsonl
 
 # 로깅 설정

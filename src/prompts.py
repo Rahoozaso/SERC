@@ -1,4 +1,3 @@
-# serc_framework/prompts.py
 from typing import List
 
 # --- 1. 초기 답변 생성 (3.2. Baseline_0) ---

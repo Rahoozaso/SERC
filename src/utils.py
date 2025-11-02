@@ -1,4 +1,3 @@
-# serc_framework/utils.py
 import yaml
 import json
 import os
@@ -62,16 +61,8 @@ def save_jsonl(data: List[Dict[str, Any]], file_path: str):
                 # ensure_ascii=False는 한국어 등을 올바르게 저장하기 위함
                 f.write(json.dumps(item, ensure_ascii=False) + '\n')
         print(f"Saved {len(data)} records to {file_path}")
-
-    except FileNotFoundError as e: # 구체적인 에러 타입 명시
-        print(f"*** Error saving data to {file_path}: FileNotFoundError - Path likely invalid. {e} ***")
-    except OSError as e: # 디렉토리 생성 등 다른 OS 관련 에러
-         print(f"*** Error during file/directory operation for {file_path}: OSError - {e} ***")
-    except TypeError as e:
-        print(f"*** Error serializing data for saving to {file_path}: {e} ***")
-        print("   Ensure all items in the list are JSON-serializable dictionaries.")
     except Exception as e: # 예상치 못한 다른 에러
-         print(f"*** An unexpected error occurred saving to {file_path}: {e} ***")
+         print(f"An unexpected error occurred saving to {file_path}: {e} ")
 
 def get_timestamp() -> str:
     """현재 시간을 'YYYYMMDD_HHMMSS' 형식의 문자열로 반환합니다."""
@@ -80,25 +71,20 @@ def get_timestamp() -> str:
 # --- Example Usage (for testing this file directly) ---
 # --- Example Usage (for testing this file directly) ---
 if __name__ == '__main__':
-    # --- [추가된 부분 시작] ---
-    # 현재 스크립트 파일(.py)이 있는 디렉토리 경로를 얻습니다.
-    # 이렇게 해야 어디서 실행하든 경로가 올바르게 계산됩니다.
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    # 프로젝트 루트 디렉토리 경로 (src 폴더의 부모 폴더)
     project_root = os.path.dirname(script_dir)
-    # --- [추가된 부분 끝] ---
+
 
     # --- Test Config Loading ---
     print("\n--- Testing Config Loading ---")
-    # 이제 project_root를 사용하여 config 파일 경로를 안전하게 만듭니다.
     config_file_path = os.path.join(project_root, 'config.yaml')
     try:
-        config = load_config(config_file_path) # 수정된 경로 사용
+        config = load_config(config_file_path) 
         print("Default T_max:", config.get('default_t_max'))
         print("Models defined:", [m.get('name') for m in config.get('models', [])])
     except Exception as e:
         print(f"Could not load config for testing: {e}")
-        print(f"Expected config path: {config_file_path}") # 경로 확인용
+        print(f"Expected config path: {config_file_path}") 
 
     # --- Test JSONL Saving & Loading ---
     print("\n--- Testing JSONL Save/Load ---")
@@ -107,12 +93,10 @@ if __name__ == '__main__':
         {'id': 2, 'text': '두 번째 줄, 한국어 포함.', 'value': 12.3},
         {'id': 3, 'nested': {'key': 'value'}}
     ]
-    # 임시 파일을 현재 스크립트와 같은 디렉토리(src)에 저장하도록 경로 지정
-    # 이제 script_dir 변수가 존재하므로 오류가 발생하지 않습니다.
     test_file_path = os.path.join(script_dir, 'temp_test_output.jsonl')
 
     # Save
-    save_jsonl(test_data, test_file_path) # 디버깅 버전 save_jsonl 호출
+    save_jsonl(test_data, test_file_path) 
 
     # Load
     loaded_data = []

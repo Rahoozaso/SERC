@@ -1,5 +1,3 @@
-# experiments/run_ablation.py
-# (Dense-Iterative 버전: 모든 사실 1:1 검증 + T_max 반복)
 import argparse
 import os
 import sys

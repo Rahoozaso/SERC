@@ -72,7 +72,6 @@ def run_cove(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, A
         logging.info(f"  [CoVe 3/4] {len(verification_questions)}개 질문 검증 실행 중...")
         verification_results = []
         for q in verification_questions:
-            # SERC의 prompt_get_verification_answer 재사용 (독립적 실행)
             answer = prompt_get_verification_answer(q, model_name, config)
             verification_results.append({'question': q, 'answer': answer})
             logging.debug(f"      Q: {q}\n      A: {answer[:100]}...")
