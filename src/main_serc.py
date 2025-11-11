@@ -80,17 +80,19 @@ def _clean_model_output(raw_response: str) -> str:
     return clean_text.strip().strip('"').strip("'")
 
 def prompt_find_sentence(current_baseline: str, fact_text: str, model_name: str, config: dict) -> str:
-    prompt = prompts.FIND_SENTENCE_TEMPLATE.format(...)
+    prompt = prompts.FIND_SENTENCE_TEMPLATE.format(current_baseline=current_baseline, 
+        fact_text=fact_text)
     raw_response = generate(prompt, model_name, config)
     return _clean_model_output(raw_response)
 
 def prompt_generate_correct_fact(fact_text: str, model_name: str, config: dict) -> str:
-    prompt = prompts.CORRECT_FACT_TEMPLATE.format(...)
+    prompt = prompts.CORRECT_FACT_TEMPLATE.format(fact_text=fact_text)
     raw_response = generate(prompt, model_name, config)
     return _clean_model_output(raw_response) 
 
 def prompt_rewrite_sentence(bad_sentence: str, correct_fact_text: str, model_name: str, config: dict) -> str:
-    prompt = prompts.REWRITE_SENTENCE_TEMPLATE.format(...)
+    prompt = prompts.REWRITE_SENTENCE_TEMPLATE.format(bad_sentence=bad_sentence, 
+        correct_fact_text=correct_fact_text)
     raw_response = generate(prompt, model_name, config)
     return _clean_model_output(raw_response) 
 
