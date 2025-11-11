@@ -1,4 +1,3 @@
-# src/data_loader.py
 import os
 import json
 import logging
@@ -6,6 +5,7 @@ import csv
 from typing import List, Dict, Any
 
 try:
+    # 일반적인 실행 시 (예: experiments/run_experiment.py에서 호출)
     from .utils import load_jsonl, save_jsonl
 except ImportError:
     import sys
@@ -23,61 +23,67 @@ if not logger.hasHandlers():
 
 # --- 벤치마크별 로더 함수 ---
 
-def _load_hallulens_longwiki_prompts(file_path: str) -> List[Dict[str, Any]]:
-    """
-    HalluLens LongWiki 생성 프롬프트 파일 로딩 (JSONL 형식 가정)
-    HalluLens에서 생성된 프롬프트 파일을 읽어 'query' 키로 표준화합니다.
-    """
-    logger.info(f"HalluLens LongWiki 프롬프트 로딩: {file_path}")
-    if not file_path.endswith(".jsonl"):
-        logger.warning(f"HalluLens LongWiki 프롬프트 파일 형식이 JSONL이 아닐 수 있습니다: {file_path}")
-
-    data = load_jsonl(file_path)
+def _load_longform_biographies(file_path: str) -> List[Dict[str, Any]]:
+    logger.info(f"Longform Biographies 프롬프트 로딩: {file_path}")
     processed_data = []
     
-    prompt_key = None
-    if data:
-        # HalluLens LongWiki 프롬프트 파일에서 사용할 키 (예: 'title', 'prompt', 'topic')
-        potential_keys = ['prompt', 'topic', 'query', 'question', 'title']
-        for key in potential_keys:
-            if key in data[0]:
-                prompt_key = key
-                logger.info(f"HalluLens LongWiki에서 프롬프트 키로 '{prompt_key}'을(를) 사용합니다.")
-                break
-    
-    if not prompt_key:
-         logger.warning(f"HalluLens LongWiki 프롬프트 키({potential_keys})를 찾을 수 없음. 원본 데이터 반환 시도.")
-         # 키 매핑 없이 반환 (query 키가 이미 있다고 가정)
-         if data and 'query' in data[0]:
-             return data
-         else:
-             raise ValueError(f"HalluLens LongWiki 프롬프트 파일에서 입력 키({potential_keys})를 찾을 수 없습니다.")
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            for i, line in enumerate(f):
+                line = line.strip()
+                if not line:
+                    continue
+                    
+                entity_name = ""
+                item_data = {} # 원본 .jsonl의 다른 데이터 저장용
 
-    for item in data:
-        query_text = item.get(prompt_key)
-        if query_text:
-             # Longform Biographies와 유사하게 프롬프트 구성 (선택 사항)
-             # query = f"Tell me about {query_text}" 
-             query = query_text # HalluLens 프롬프트가 이미 질문 형태일 수 있음
+                # .jsonl 파일 형식인지(.txt인지) 확인
+                try:
+                    item = json.loads(line)
+                    if isinstance(item, dict):
+                        # FActScore/HalluLens LongWiki 등에서 사용하는 키 탐색
+                        potential_keys = ['topic', 'entity', 'name', 'title', 'prompt']
+                        for key in potential_keys:
+                            if key in item:
+                                entity_name = item.get(key)
+                                item_data = {k:v for k,v in item.items() if k != key}
+                                break
+                        if not entity_name:
+                             logger.warning(f"JSONL {i+1}번째 줄에서 엔티티 키를 찾을 수 없음: {line}")
+                             continue
+                    else: # JSONL이지만 딕셔너리 아님
+                         entity_name = str(item) # 혹시 모르니 문자열로
+                except json.JSONDecodeError:
+                    # 단순 .txt 파일 (한 줄에 엔티티 이름만 있음)
+                    entity_name = line
+
+                if entity_name: 
+                    # CoVe 논문(4.1.4절)에서 사용한 프롬프트 형식
+                    query = f"Tell me a bio of {entity_name}"
+                    
+                    processed_item = {
+                        'query': query, # 표준화된 'query' 키
+                        'topic': entity_name, # FactScore 평가 시 'topic'이 필요함
+                        **item_data # .jsonl이었을 경우 나머지 필드
+                    }
+                    processed_data.append(processed_item)
+
+    except FileNotFoundError:
+         logger.error(f"엔티티 파일({file_path})을 찾을 수 없습니다.")
+         raise
+    except Exception as e:
+         logger.error(f"엔티티 파일({file_path}) 처리 중 오류: {e}", exc_info=True)
+         raise
              
-             processed_item = {
-                 'query': query, # 표준화된 'query' 키
-                 **{k:v for k,v in item.items() if k != prompt_key} # 나머지 필드 (id 등)
-             }
-             processed_data.append(processed_item)
-    logger.info(f"HalluLens LongWiki 프롬프트 ({file_path}) 에서 {len(processed_data)}개 항목 처리 완료.")
+    logger.info(f"Longform Biographies ({file_path}) 에서 {len(processed_data)}개 프롬프트 생성 완료.")
     return processed_data
 
 def _load_hallulens_precisewikiqa_prompts(file_path: str) -> List[Dict[str, Any]]:
-    """
-    HalluLens PreciseWikiQA 생성 프롬프트 파일 로딩 (JSONL 형식 가정)
-    'question'을 'query'로 매핑하고 'answer'를 'answers' 리스트로 변환.
-    """
     logger.info(f"HalluLens PreciseWikiQA 프롬프트 로딩: {file_path}")
     if not file_path.endswith(".jsonl"):
         logger.warning(f"HalluLens PreciseWikiQA 프롬프트 파일 형식이 JSONL이 아닐 수 있습니다: {file_path}")
         
-    data = load_jsonl(file_path)
+    data = load_jsonl(file_path) # utils.py의 함수 사용
     processed_data = []
     
     if not data or 'question' not in data[0]:
@@ -156,28 +162,39 @@ def load_dataset(dataset_name: str, file_path: str) -> List[Dict[str, Any]]:
     loader_func = None
     name_lower = dataset_name.lower() # 소문자로 비교
 
-    if 'hallulens_longwiki' in name_lower:
-        loader_func = _load_hallulens_longwiki_prompts
+    if 'longform_bio' in name_lower: # 'hallulens_longwiki' 대신
+        loader_func = _load_longform_biographies
     elif 'hallulens_precisewikiqa' in name_lower:
         loader_func = _load_hallulens_precisewikiqa_prompts
     elif 'truthfulqa' in name_lower:
         loader_func = _load_truthfulqa
-    # --- (필요시 다른 벤치마크 키 추가) ---
-    # elif 'multispanqa' in name_lower:
-    #     loader_func = _load_multispanqa # MultiSpanQA도 필요하다면 추가
     else:
         # 특정 로더가 매핑되지 않은 경우, 파일 확장자로 기본 로딩 시도
         logger.warning(f"'{dataset_name}'에 대한 특정 로더를 찾을 수 없습니다. 파일 확장자 기반 기본 로딩 시도.")
         file_extension = os.path.splitext(file_path)[1].lower()
         if file_extension == ".jsonl":
              data = load_jsonl(file_path)
-             if data and not any(key in data[0] for key in ['question', 'query']):
-                 logger.warning(f"로드된 JSONL 데이터의 첫 항목에 'question' 또는 'query' 키가 없습니다.")
-             return data
+        elif file_extension == ".json":
+             with open(file_path, 'r', encoding='utf-8') as f:
+                 data = json.load(f)
+             if not isinstance(data, list):
+                 raise ValueError("기본 JSON 로더는 리스트 형태만 지원합니다.")
+        elif file_extension == ".csv":
+             data = pd.read_csv(file_path).to_dict('records')
+        elif file_extension == ".txt":
+             # Longform Bio와 동일하게 텍스트 라인 로더로 가정
+             logger.info(".txt 파일 감지. Longform Biographies 로더를 사용합니다.")
+             loader_func = _load_longform_biographies
         else:
-             raise ValueError(f"지원되지 않거나 알 수 없는 데이터셋 이름/형식: {dataset_name} ({file_path})")
-
-    # 선택된 로더 함수 실행
+             raise ValueError(f"지원되지 않는 파일 확장자: {file_extension}")
+        
+        # loader_func가 위에서 할당되지 않았다면, data는 이미 로드됨
+        if loader_func is None:
+             # 공통 키 유효성 검사
+             if data and not any(key in data[0] for key in ['question', 'query']):
+                 logger.warning(f"로드된 데이터의 첫 항목에 'question' 또는 'query' 키가 없습니다.")
+             return data
+        
     try:
         data = loader_func(file_path)
 
@@ -199,30 +216,33 @@ def load_dataset(dataset_name: str, file_path: str) -> List[Dict[str, Any]]:
 
 # --- 직접 실행 테스트용 예시 (수정됨) ---
 if __name__ == '__main__':
-    # 테스트를 위해 임시 데이터 파일 생성 및 각 로더 함수 테스트
     logger.info("--- 데이터 로더 테스트 시작 ---")
     test_dir = "_temp_test_data_loader"
     os.makedirs(test_dir, exist_ok=True)
 
     try:
-        # HalluLens LongWiki 테스트
-        test_file_hl = os.path.join(test_dir, "temp_hallulens_longwiki_prompts.jsonl")
-        test_data_hl = [{'prompt': 'Topic 1 about AI', 'id': 'hl1'}, {'topic': 'Topic 2 about Space'}] # 'topic' 키 사용 예시
-        save_jsonl(test_data_hl, test_file_hl) # utils.save_jsonl 사용
-        loaded_hl = load_dataset("hallulens_longwiki", test_file_hl)
-        assert len(loaded_hl) == 2 and 'query' in loaded_hl[0] and loaded_hl[0]['query'] == 'Topic 1 about AI'
-        logger.info("[성공] HalluLens LongWiki 로더 테스트")
+        # 1. Longform Biographies (TXT) 테스트
+        test_file_bio_txt = os.path.join(test_dir, "temp_bio_entities.txt")
+        test_data_bio_txt = "Leonardo da Vinci\nMarie Curie"
+        with open(test_file_bio_txt, 'w', encoding='utf-8') as f:
+            f.write(test_data_bio_txt)
+        
+        loaded_bio = load_dataset("longform_bio", test_file_bio_txt)
+        assert len(loaded_bio) == 2 and 'query' in loaded_bio[0]
+        assert loaded_bio[0]['query'] == 'Tell me a bio of Leonardo da Vinci'
+        assert 'topic' in loaded_bio[0] and loaded_bio[0]['topic'] == 'Leonardo da Vinci'
+        logger.info("[성공] Longform Biographies (.txt) 로더 테스트")
 
-        # HalluLens PreciseWikiQA 테스트
+        # 2. HalluLens PreciseWikiQA 테스트
         test_file_pqa = os.path.join(test_dir, "temp_precisewikiqa_prompts.jsonl")
         test_data_pqa = [{'question': 'Who are politicians born in Boston?', 'answer': 'John F. Kennedy', 'id': 'pqa1'}]
-        save_jsonl(test_data_pqa, test_file_pqa)
+        save_jsonl(test_data_pqa, test_file_pqa) # utils.save_jsonl 사용
         loaded_pqa = load_dataset("hallulens_precisewikiqa", test_file_pqa)
         assert len(loaded_pqa) == 1 and loaded_pqa[0]['query'] == 'Who are politicians born in Boston?'
         assert 'answers' in loaded_pqa[0] and loaded_pqa[0]['answers'] == ['John F. Kennedy']
         logger.info("[성공] HalluLens PreciseWikiQA 로더 테스트")
 
-        # TruthfulQA 테스트
+        # 3. TruthfulQA 테스트
         test_file_tqa = os.path.join(test_dir, "temp_TruthfulQA.csv")
         test_data_tqa = [
             {'Type': 'Misconceptions', 'Category': 'Health', 'Question': 'Does sugar make kids hyper?', 'Correct Answers': 'No...', 'Incorrect Answers': 'Yes...'},
@@ -230,7 +250,6 @@ if __name__ == '__main__':
         ]
         # CSV 파일 쓰기
         with open(test_file_tqa, 'w', encoding='utf-8', newline='') as f:
-            # 헤더에 없는 키가 있을 수 있으므로 fieldnames를 명시적으로 지정
             writer = csv.DictWriter(f, fieldnames=test_data_tqa[0].keys())
             writer.writeheader()
             writer.writerows(test_data_tqa)
@@ -249,4 +268,3 @@ if __name__ == '__main__':
         if os.path.exists(test_dir):
             shutil.rmtree(test_dir)
             logger.info(f"임시 테스트 디렉토리 삭제: {test_dir}")
-

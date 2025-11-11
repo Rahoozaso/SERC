@@ -3,10 +3,10 @@
 
 # --- Default Generation Parameters ---
 default_generation_params:
-  temperature: 0.7        # 기본 온도 값
+  temperature: 0.01        # 기본 온도 값
   top_p: 0.9              # 기본 top_p 값
-  max_new_tokens: 512     # 생성될 최대 새 토큰 수
-  # repetition_penalty: 1.1 # 필요시 주석 해제
+  max_new_tokens: 128     # 생성될 최대 새 토큰 수
+  repetition_penalty: 1.1 # 필요시 주석 해제
 
 # --- Models to Use in Experiments ---
 models:
@@ -47,10 +47,10 @@ default_max_facts_per_group: 5 # 기본 그룹당 최대 사실 수 (튜닝 대�
 # --- Data Paths ---
 # 프로젝트 루트 디렉토리 기준 상대 경로
 data_paths:
-  halueval: "data/halueval_sample.jsonl" # 예시 경로
-  factscore: "data/factscore_sample.tsv"   # 예시 경로
-  hallulens: "data/hallulens_sample.json"  # 예시 경로
-  hotpotqa_dev: "data/hotpotqa_dev_sample.json" # 예시 경로 (Tmax 실험 및 본 평가용)
+  longform_bio: "data/processed/factscore_bio_entities.txt"
+  hallulens_precisewikiqa: "data/hallulens_precisewikiqa_prompts.jsonl"   # 예시 경로
+  truthfulqa: "data/TruthfulQA.csv" 
 
 # --- Result Paths ---
 results_base_dir: "results" # 모델/데이터셋별 결과 저장 기본 디렉토리
+evaluator_model_name: "gpt-5"

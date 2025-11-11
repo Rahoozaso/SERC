@@ -27,7 +27,7 @@ dependencies:
   - pytorch::pytorch
   - pytorch::torchvision
   - pytorch::torchaudio
-  - pytorch-cuda=11.8 # PyTorch와 함께 설치될 CUDA 버전 지정
+  # - pytorch-cuda=11.8 # PyTorch와 함께 설치될 CUDA 버전 지정
 
   # --- pip 전용 패키지 ---
   - pip:

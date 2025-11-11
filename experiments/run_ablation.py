@@ -42,10 +42,7 @@ def SERC_Dense_Iterative(query: str, model_name: str, config: Dict[str, Any],
                          t_max: Optional[int] = None
                          # (max_facts_per_group는 Dense 모드이므로 필요 없음)
                          ) -> Dict[str, Any]:
-    """
-    Ablation Study용: Dense (1:1 검증) 및 Iterative (T_max > 1) 버전의 SERC 실행
-    """
-    
+
     # --- 하이퍼파라미터 설정 ---
     T_MAX = t_max if t_max is not None else config.get('default_t_max', 3)
     
@@ -223,7 +220,7 @@ def run_single_item_wrapper(item: Dict[str, Any], model_name: str, config: Dict[
 def main():
     parser = argparse.ArgumentParser(description="Run SERC Ablation (Dense-Iterative) Experiment.")
     
-    default_config_path = os.path.join(PROJECT_ROOT, "configs", "config.yaml")
+    default_config_path = os.path.join(PROJECT_ROOT, "config.yaml")
     parser.add_argument("--config", type=str, default=default_config_path, help="Path to config file.")
     parser.add_argument("--model", type=str, required=True, help="Model name (defined in config).")
     parser.add_argument("--dataset", type=str, required=True, help="Dataset name (key in config data_paths).")
