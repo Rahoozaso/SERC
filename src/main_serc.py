@@ -397,7 +397,8 @@ def SERC(query: str, model_name: str, config: Dict[str, Any],
 
             if bad_sentence not in final_response_snapshot:
               logging.warning(f"    [경고] 오류 {fi}의 원본 문장이 현재 baseline에 없음. (이전 교정에서 덮어쓰인 듯 함). 교정 건너뜁니다.")
-              correction_item.append(correction_item)
+              correction_item['status'] = 'find_failed_sentence_not_in_baseline'
+              correction_log.append(correction_item)
               continue
 
             correct_fact_text = prompt_generate_correct_fact(fi_text, model_name, config)
