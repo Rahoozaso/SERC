@@ -4,6 +4,7 @@ import sys
 import logging
 from typing import Dict, Any, List, Optional, Callable
 import pprint
+import re
 
 # --- [1] 프로젝트 경로 설정 ---
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -59,26 +60,66 @@ def prompt_validate_one_fact_against_evidence(fact_text: str, evidence_text: str
         logging.warning(f"Unexpected validation response: '{response}'. Defaulting to '[No]' (Syndrome).")
         return "[No]" 
 def _clean_model_output(raw_response: str) -> str:
+    """
+    모델의 원시 출력을 공격적으로 정리하여 '진짜 답변' 텍스트만 추출합니다.
+    V3.1: [ANSWER] 태그 뒤의 내용 우선 추출 + "인라인" 쓰레기 제거 기능 추가.
+    """
+    if not raw_response:
+        return ""
+
+    def _final_scrub(line: str) -> str:
+        """V3.1의 핵심: 문장 끝에 붙은 인라인 쓰레기를 제거합니다."""
+        # 1. # (해시)로 시작하는 주석/앵무새 제거
+        line = re.sub(r'#.*$', '', line).strip()
+        # 2. [...]로 끝나는 꼬리표 태그 제거
+        line = re.sub(r'\[.*?\]$', '', line).strip()
+        # 3. 그 외 프롬프트 찌꺼기
+        line = re.sub(r'END OF INSTRUCTION.*$', '', line, flags=re.IGNORECASE).strip()
+        line = re.sub(r'Note:.*$', '', line, flags=re.IGNORECASE).strip()
+        return line.strip().strip('"').strip("'")
+
+    # --- 1. [ANSWER] 태그를 기준으로 "명시적 답변" 우선 추출 ---
+    answer_markers = [r'\[ANSWER\]', r'Answer:', r'\[FINAL ANSWER\]']
+    for marker_pattern in answer_markers:
+        match = re.search(marker_pattern + r'(.*)', raw_response, re.DOTALL | re.IGNORECASE)
+        if match:
+            potential_answer_block = match.group(1).strip()
+            for line in potential_answer_block.splitlines():
+                clean_line = line.strip()
+                if len(clean_line) > 5 and not clean_line.startswith(('#', '|', '`', '_', '?', '[')):
+                    final_answer = _final_scrub(clean_line) # <--- [V3.1] 인라인 청소 적용
+                    if final_answer:
+                        logging.debug(f"[_clean_model_output] [ANSWER] 마커로 추출: '{final_answer}'")
+                        return final_answer
+            # [ANSWER] 뒤에 쓸만한 게 없으면 2단계로 넘어감
+
+    # --- 2. [ANSWER] 마커가 없거나 실패 시, "전체 텍스트"에서 쓰레기 청소 ---
     clean_text = raw_response
-    hallucination_tags = [
-        "[SENTENCE]", "[INSTRUCTION]", "[ANSWER]", "[REASON]",
-        "[VERIFICATION]", "(Note:", "The final answer is:",
-        "KEYWORD:", "[END OF INSTRUCTION]", "# [ANSWER]", "[RATING]","[END OF ERROR FACT]", "[END OF CORRECTED FA..."
+    patterns_to_remove = [
+        r'\[.*?\]',
+        r'\(Note:.*?\)',
+        r'\(This statement is TRUE\.\)',
+        r'(Step \d+:|Note:|REASONING|JUSTIFICATION|EXPLANATION|\[REASON\]|\[RATING\])',
+        r'^\s*#+.*$',
+        r'```python.*$',
+        r'```'
     ]
+    for pattern in patterns_to_remove:
+        clean_text = re.sub(pattern, '', clean_text, flags=re.IGNORECASE | re.MULTILINE)
 
-    indices = []
-    for tag in hallucination_tags:
-        idx = clean_text.find(tag)
-        if idx != -1:
-            indices.append(idx)
+    clean_text = re.sub(r'^[\s|?_*#-]*$', '', clean_text, flags=re.MULTILINE)
 
-    split_idx = min(indices) if indices else -1
+    # --- 3. 첫 번째 '유의미한' 줄 찾기 ---
+    lines = [line.strip() for line in clean_text.splitlines()]
+    for line in lines:
+        if len(line) > 5 and not line.startswith(('_', '?', '|', '#', '`')):
+            final_answer = _final_scrub(line) # <--- [V3.1] 인라인 청소 적용
+            if final_answer:
+                logging.debug(f"[_clean_model_output] 쓰레기 필터링 후 첫 줄 추출: '{final_answer}'")
+                return final_answer
 
-    if split_idx != -1:
-        clean_text = clean_text[:split_idx]
-    clean_text = clean_text.split('\n')[0] 
-    return clean_text.strip().strip('"').strip("'")
-
+    logging.warning(f"[_clean_model_output] 모델 출력이 쓰레기(garbage)라서 모두 필터링됨. 원본: '{raw_response[:100]}...'")
+    return ""
 def prompt_find_sentence(current_baseline: str, fact_text: str, model_name: str, config: dict) -> str:
     prompt = prompts.FIND_SENTENCE_TEMPLATE.format(current_baseline=current_baseline, 
         fact_text=fact_text)
@@ -322,7 +363,7 @@ def SERC(query: str, model_name: str, config: Dict[str, Any],
 
                 if validation_result == "[Yes]":
                     logging.info(f"    [!!! 신드롬 탐지 !!!] {fid}: {ftext}")
-                    syndrome[fid] = {"fact_text": ftext, "evidence": verified_answer}
+                    syndrome[fid] = {"fact_text": ftext, "evidence": verified_answer, "original_sentence": sentence_text}
 
         cycle_log['steps']['3_syndrome_generation'] = validation_details
 
@@ -345,14 +386,19 @@ def SERC(query: str, model_name: str, config: Dict[str, Any],
             correction_item: Dict[str, Any] = {'fact_id': fi, 'original_fact': fi_text}
             logging.info(f"    - 오류 {fi} 교정 시도: '{fi_text[:100]}...'")
 
-            bad_sentence = prompt_find_sentence(final_response_snapshot, fi_text, model_name, config)
-            bad_sentence = bad_sentence.strip() if bad_sentence else ""
+            bad_sentence = error_info.get('original_sentence', '').strip()
+
             correction_item['found_sentence'] = bad_sentence
-            if bad_sentence.lower() == "none" or not bad_sentence:
-                logging.warning(f"    [경고] 오류 {fi} 원본 문장 찾기 실패. 교정 건너뜁니다.")
-                correction_item['status'] = 'find_failed'
-                correction_log.append(correction_item)
-                continue
+            if not bad_sentence:
+              logging.warning(f"    [경고] 오류 {fi} 신드롬에 원본 문장(original_sentence) 없음. 교정 건너뜁니다.")
+              correction_item['status'] = 'find_failed_no_sentence_in_syndrome'
+              correction_log.append(correction_item)
+              continue
+
+            if bad_sentence not in final_response_snapshot:
+              logging.warning(f"    [경고] 오류 {fi}의 원본 문장이 현재 baseline에 없음. (이전 교정에서 덮어쓰인 듯 함). 교정 건너뜁니다.")
+              correction_item.append(correction_item)
+              continue
 
             correct_fact_text = prompt_generate_correct_fact(fi_text, model_name, config)
             correction_item['corrected_fact'] = correct_fact_text
