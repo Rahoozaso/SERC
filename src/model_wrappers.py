@@ -142,7 +142,7 @@ def generate(prompt: str, model_name: str, config: Dict[str, Any],
             # 입력 부분을 제외하고 새로 생성된 텍스트만 디코딩
             response_ids = outputs[0][inputs['input_ids'].shape[1]:]
             response = tokenizer.decode(response_ids, skip_special_tokens=True)
-            print(f"로컬 HF 응답: {response[:100]}...") # 너무 길면 잘라서 출력
+            print(f"로컬 HF 응답: {response}") # 너무 길면 잘라서 출력
 
         else:
             print(f"*** 오류: Provider '{provider}'은(는) 지원되지 않습니다. ***")

@@ -10,6 +10,74 @@ BASELINE_PROMPT_TEMPLATE = """[INSTRUCTION] Your task is to answer the user's qu
 [QUESTION]
 {query}
 [RESPONSE] """
+BASELINE_PROMPT_TEMPLATE_PN = """[INSTRUCTION] Your task is to answer the user's question.
+
+[QUESTION]
+{query}
+[RESPONSE] """
+
+QUERY_ENTITY_EXTRACTOR_TEMPLATE = """[INSTRUCTION] Identify the main subject's **Name** and its **Characteristic** (e.g., type, location, or occupation) from the [USER QUERY].
+Respond ONLY in "Name (Characteristic)" format.
+If no characteristic is given, respond with "Name (None)".
+
+[TASK]
+[USER QUERY]
+{query}
+[RESPONSE] 
+"""
+
+
+BASELINE_ENTITY_EXTRACTOR_TEMPLATE = """[INSTRUCTION] Identify the main subject's **Proper Noun (Name)** and its **single Characteristic** (e.g., type, location, or occupation) from the [BASELINE TEXT].
+Respond ONLY in "Name (Characteristic)" format.
+
+[TASK]
+[BASELINE TEXT]
+{baseline_text}
+[RESPONSE]
+"""
+# [신설] 1.5c: RAG에서 지배적 개체 설명 추출
+RAG_DOMINANT_ENTITY_TEMPLATE = """[INSTRUCTION] You are a fact-checker. Read the [SEARCH RESULTS] about the [QUERY].
+Identify the main subject's **Proper Noun (Name)** and its single **most dominant Characteristic** (e.g., type, location, or occupation).
+Respond ONLY in "Name (Characteristic)" format.
+
+[TASK]
+[QUERY]: {query}
+[SEARCH RESULTS]:
+{context}
+[RESPONSE]
+"""
+# [신설] 1.5d: 개체 일치 여부 판단
+ENTITY_CONSISTENCY_JUDGE_TEMPLATE = """
+[INSTRUCTION]
+You are an AI fact-checker. Your task is to determine if [DESCRIPTION 1] and [DESCRIPTION 2] refer to the same entity.
+[DESCRIPTION 1]
+{desc_a}
+[DESCRIPTION 2]
+{desc_b}
+---
+[EXAMPLE OF YOUR RESPONSE FORMAT]
+[ANALYSIS] "Joe Biden" is the common short name for "Joseph R. Biden Jr.". They refer to the same person.
+[JUDGMENT] [Yes]
+---
+
+[YOUR TASK]
+Now, provide the [ANALYSIS] and [JUDGMENT] for the two descriptions provided above, following the example format.
+Start your response *immediately* with the [ANALYSIS].
+
+[ANALYSIS]
+"""
+
+# [신설] 1.6 (Case B): RAG-First 베이스라인 재생성
+BASELINE_PROMPT_TEMPLATE_RAG_FIRST = """[INSTRUCTION] Your task is to answer the user's question.
+You MUST answer **ONLY** based on the information provided in the [CONTEXT DOCUMENTS].
+Do NOT use any external knowledge or make assumptions.
+
+[CONTEXT DOCUMENTS]
+{context}
+
+[QUESTION]
+{query}
+[RESPONSE] """
 
 # --- 2. Fact Extraction (3.3. ExtractFacts) ---
 EXTRACT_FACTS_TEMPLATE = """[INSTRUCTION] Extract the main factual claims from the [SENTENCE].
@@ -73,8 +141,15 @@ def generate_sentence_group_question_prompt(fact_texts_list: List[str]) -> str:
     return prompt
 
 
-VERIFICATION_ANSWER_TEMPLATE = """[INSTRUCTION] Based only on known facts, provide an answer to the following question.
+VERIFICATION_ANSWER_TEMPLATE = """
+[INSTRUCTION] Based only on known facts, provide an answer to the following question.
 **You must answer in a single, complete sentence.** Do not speculate or add explanations.
+
+rules: 
+1. Answer in exactly ONE clear, complete sentence.
+2. Start the sentence with the main subject's full name or noun phrase from the question
+   (do NOT start with pronouns like "He", "She", "They", "It").
+3. Explicitly answer EVERY part of the question (person, place, date, number, etc.).
 
 [EXAMPLE 1]
 [QUESTION]
@@ -86,13 +161,14 @@ George Washington was the first president of the United States and was inaugurat
 [TASK]
 [QUESTION]
 {question}
-[FACTUAL ANSWER] """
+[FACTUAL ANSWER] 
+"""
 
 # 3.4.4. (3) Syndrome Calculation
 VALIDATE_EVIDENCE_TEMPLATE = """
 [CRITICAL INSTRUCTION] You are an **EXTREMELY STRICT** fact checker. Your ONLY task is to determine if [STATEMENT 1] and [STATEMENT 2] assert **DIFFERENT** facts about the **SAME** subject or attribute.
 
-1.  If they assert different values for the same attribute (e.g., different birth dates, different universities, different relationships, etc.) about the same subject, it is a **CONTRADICTION**.
+1.  If they assert different values for the same attribute about the same subject, it is a **CONTRADICTION**.
 2.  Do NOT attempt to reconcile the statements or claim they might both be true. If the information is factually different, the answer is [Yes].
 
 [STATEMENT 1]
@@ -142,7 +218,7 @@ REWRITE_SENTENCE_TEMPLATE = """[CRITICAL INSTRUCTION] Your task is to seamlessly
 1. Preserve the original sentence's style and subject reference.
 2. The final output must be **ONLY the rewritten sentence**.
 
-[EXAMPLE 1]
+[EXAMPLE]
 [ORIGINAL SENTENCE]
 The actor, born in 1957, starred in "Forrest Gump".
 [CORRECTED FACT]
@@ -156,6 +232,27 @@ The actor, born in 1956, starred in "Forrest Gump".
 [CORRECTED FACT]
 {correct_fact_text}
 [REWRITTEN SENTENCE] """
+
+RECOMPOSE_PROMPT_TEMPLATE = """
+[Context]
+You are an expert editor. Your goal is to synthesize a final, clean answer to a user's query, based *only* on a provided list of facts.
+
+[Original Query]:
+{query}
+
+[List of Facts]:
+{fact_list_str}
+
+[Instructions]:
+1.  Read the [Original Query] to understand the topic.
+2.  Read the [List of Facts]. This list is the result of an automated process and may contain errors, irrelevant information (e.g., "Alice's event", "the movie..."), or junk artifacts (e.g., "// No change needed", "This statement is TRUE.").
+3.  Your task is to **filter** this list. **You MUST ignore** any fact that is irrelevant to the [Original Query] or looks like a junk/meta-comment.
+4.  Using *only* the **relevant and valid facts** that remain after filtering, write a single, coherent, and well-written paragraph that directly answers the [Original Query].
+5.  **DO NOT** add any new information that is not present in the [List of Facts].
+6.  If the [List of Facts] contains no relevant information to the [Original Query], respond with "N/A".
+
+[Final Answer]:
+"""
 
 # --- 6. CoVe (Chain-of-Verification) Baseline Prompts ---
 COVE_PLAN_PROMPT_TEMPLATE = """[INSTRUCTION]
@@ -239,3 +336,58 @@ JUDGE_TRUTHFULQA_PROMPT_TEMPLATE = """[지시]
 
 [판단]
 """
+
+VERIFICATION_ANSWER_TEMPLATE_RAG = """
+[INSTRUCTION] You are a fact-checker. Your goal is to provide a single, concise, and factual answer to the [QUESTION] based **only** on the [CONTEXT DOCUMENTS].
+**You must answer in a single, complete sentence.**
+
+**Do NOT guess.**
+**Do NOT** use your internal knowledge.
+
+[CONTEXT DOCUMENTS]:
+{context}
+
+[TASK]
+[QUESTION]:
+{question}
+[FACTUAL ANSWER]:
+"""
+
+CORRECT_FACT_TEMPLATE_RAG = """
+[INSTRUCTION] The [ERROR FACT] below is incorrect, typically regarding one of its key attributes (e.g., a person, place, date, or event).
+Your task is to find the correct information **for that specific attribute** within the [CONTEXT DOCUMENTS] and rewrite the fact correctly.
+
+**CRITICAL RULE:** The [CONTEXT DOCUMENTS] are assumed to contain the correct information. You MUST find it.
+
+[CONTEXT DOCUMENTS]:
+{context}
+
+[TASK]
+[ERROR FACT]:
+{fact_text}
+[CORRECTED FACT]:
+"""
+
+EXTRACT_FACTS_TEMPLATE_PN = """
+[MAIN SUBJECT]: {main_subject}
+
+[INSTRUCTION] Extract the main factual claims from the [SENTENCE].
+List **only the most important and non-overlapping** facts.
+Your list must contain a **strict maximum of 3** facts. Do not exceed 3.
+Do not list redundant combinations of other facts.
+
+**CRITICAL RULE: Replace any pronouns (e.g., 'She', 'He', 'Her') that refer to the [MAIN SUBJECT] with "{main_subject}". If a fact is about a *different* subject, state it as is.**
+
+[SENTENCE] The event, organized by Alice, will happen at 10 AM.
+[LIST OF FACTS]
+- The event was organized by Alice.
+- The event will happen at 10 AM.
+
+[SENTENCE] She graduated from the University of Montreux in Switzerland.
+[LIST OF FACTS]
+- {main_subject} graduated from the University of Montreux.
+- The University of Montreux is located in Switzerland.
+
+[SENTENCE]
+{sentence}
+[LIST OF FACTS (STRICT MAX 3)] """
