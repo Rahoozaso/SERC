@@ -304,6 +304,28 @@ Read the 'Initial Response' and generate a list of **Verification Questions** ne
 Each question should verify a specific fact (e.g., person, place, date, statistic, claim).
 Write one question per line.
 
+[EXAMPLE 1]
+[ORIGINAL QUESTION]
+Tell me a bio of Marie Curie.
+[INITIAL RESPONSE]
+Marie Curie was a physicist and chemist born in Poland. She won two Nobel Prizes.
+[LIST OF VERIFICATION QUESTIONS]
+What was Marie Curie's full name?
+Where in Poland was Marie Curie born?
+What fields did Marie Curie study?
+How many Nobel Prizes did Marie Curie win?
+
+[EXAMPLE 2]
+[ORIGINAL QUESTION]
+What happened at the Battle of Waterloo?
+[INITIAL RESPONSE]
+The Battle of Waterloo was fought on June 18, 1815. Napoleon's French army was defeated by the Seventh Coalition.
+[LIST OF VERIFICATION QUESTIONS]
+When was the Battle of Waterloo fought?
+Who commanded the French army at the Battle of Waterloo?
+Who defeated Napoleon's army at Waterloo?
+
+[TASK]
 [ORIGINAL QUESTION]
 {query}
 
@@ -318,11 +340,42 @@ Write one question per line.
 
 # 6.3. CoVe Step 4: Final Response Generation (Revision)
 COVE_REVISE_PROMPT_TEMPLATE = """[INSTRUCTION]
-You must revise the 'Initial Response' based on the 'Verification Results' to generate a final answer.
-Correct any parts of the 'Initial Response' that contradict or are proven false by the 'Verification Results'.
-If the results support the 'Initial Response', maintain that information.
-Generate the final, accurate answer to the 'Original Question'.
+You must synthesize a final, verified response.
+You are given an 'Initial Response' and 'Verification Results' (which you should treat as facts from "another source").
+Write a new, revised response that **only includes facts that are consistent** between both sources.
+**Discard any facts** from the 'Initial Response' that are contradicted by the 'Verification Results'.
 
+[EXAMPLE 1: Correction]
+[ORIGINAL QUESTION]
+Tell me a bio of Albert Einstein.
+[INITIAL RESPONSE]
+Albert Einstein was born in 1880. He developed the theory of general relativity.
+[VERIFICATION RESULTS (Q&A Pairs)]
+Q1: When was Albert Einstein born?
+A1: Albert Einstein was born on March 14, 1879.
+Q2: What theory did Albert Einstein develop?
+A2: Albert Einstein is most famous for his theory of general relativity.
+[FINAL REVISED RESPONSE]
+Albert Einstein was born on March 14, 1879. He developed the theory of general relativity.
+
+[EXAMPLE 2: Discarding]
+[ORIGINAL QUESTION]
+Tell me about the Eiffel Tower.
+[INITIAL RESPONSE]
+The Eiffel Tower is a wrought-iron lattice tower in Paris, France. It was designed by Gustave Eiffel and is 300 meters tall. It was painted yellow.
+[VERIFICATION RESULTS (Q&A Pairs)]
+Q1: Where is the Eiffel Tower?
+A1: The Eiffel Tower is located in Paris, France.
+Q2: Who designed the Eiffel Tower?
+A2: The tower was designed and built by Gustave Eiffel's company.
+Q3: How tall is the Eiffel Tower?
+A3: The tower is 330 meters (1,083 ft) tall.
+Q4: What color is the Eiffel Tower?
+A4: The Eiffel Tower is currently painted in three shades of 'Eiffel Tower Brown'.
+[FINAL REVISED RESPONSE]
+The Eiffel Tower is a wrought-iron lattice tower in Paris, France, designed by Gustave Eiffel's company. It stands 330 meters tall and is painted 'Eiffel Tower Brown'.
+
+[TASK]
 [ORIGINAL QUESTION]
 {query}
 
@@ -334,7 +387,6 @@ Generate the final, accurate answer to the 'Original Question'.
 
 [FINAL REVISED RESPONSE]
 """
-
 # --- 7. Ablation Study (Dense) Prompts ---
 GENERATE_QUESTION_FOR_ONE_FACT_TEMPLATE = """[INSTRUCTION] Use 'Who', 'What', 'Where', or 'When' to ask a question about the [FACT].
 [FACT]

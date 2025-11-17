@@ -18,7 +18,12 @@ try:
     from src import prompts
     from src.utils import load_config, save_jsonl, get_timestamp
     from src.data_loader import load_dataset
-    from src.main_serc import prompt_baseline, _prompt_get_verification_answer 
+
+    # [수정] RAG 모듈 및 RAG용 헬퍼 임포트
+    from src.rag_retriever import RAGRetriever
+    from src.prompts import VERIFICATION_ANSWER_TEMPLATE_RAG
+    # SERC의 Baseline 생성 함수 재사용
+    from src.main_serc import prompt_baseline 
 
 except ImportError:
     logging.error("--- ImportError Traceback (전체 오류 로그) ---")
@@ -33,7 +38,7 @@ except ImportError:
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# --- [2] CoVe 헬퍼 함수 ---
+# --- [2] CoVe-RAG 헬퍼 함수 ---
 
 def _parse_cove_questions(text: str) -> List[str]:
     """CoVe 계획 단계에서 생성된 질문 목록 문자열을 파싱합니다."""
@@ -50,6 +55,24 @@ def _format_qa_evidence(qa_list: List[Dict[str, str]]) -> str:
     for i, qa in enumerate(qa_list, 1):
         formatted_str += f"Q{i}: {qa['question']}\nA{i}: {qa['answer']}\n\n"
     return formatted_str.strip()
+
+def _cove_get_rag_answer(question: str, context: str, model_name: str, config: dict) -> str:
+    """CoVe 3단계: RAG로 검증 답변 생성"""
+    prompt = prompts.VERIFICATION_ANSWER_TEMPLATE_RAG.format(question=question, context=context)
+    answer_params = {"temperature": 0.01, "max_new_tokens": 100}
+    raw_response = generate(prompt, model_name, config, generation_params_override=answer_params)
+    
+    # main_serc.py의 _prompt_get_verification_answer에서 가져온 정리 로직
+    clean_text = raw_response
+    hallucination_tags = [ "[SENTENCE]", "[INSTRUCTION]", "[ANSWER]", "[REASON]", "[VERIFICATION]", "(Note:", "The final answer is:" ]
+    indices = []
+    for tag in hallucination_tags:
+        idx = clean_text.find(tag)
+        if idx != -1: indices.append(idx)
+    split_idx = min(indices) if indices else -1
+    if split_idx != -1: clean_text = clean_text[:split_idx]
+    clean_text = clean_text.split('\n')[0]
+    return clean_text.strip().strip('"').strip("'")
 
 def _clean_model_output(raw_response: str) -> str:
     """SERC의 _clean_model_output 재사용 (CoVe 4단계 정제용)"""
@@ -92,27 +115,35 @@ def _clean_model_output(raw_response: str) -> str:
     logging.warning(f"[_clean_model_output] 모델 출력이 쓰레기(garbage)라서 모두 필터링됨. 원본: '{raw_response[:100]}...'")
     return ""
 
-# --- [3] CoVe (Non-RAG) 메인 실행 함수 ---
+# --- [3] CoVe-RAG 메인 실행 함수 ---
 
-def run_cove(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, Any]:
+def run_cove_rag(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, Any]:
     """
     CoVe (Chain-of-Verification)의 4단계를 실행합니다.
-    [수정] 3단계 검증을 RAG 없이 (모델 내부 지식) 실행합니다.
+    [수정] 3단계 검증을 RAG를 사용하여 실행합니다.
     """
     
-    cove_history = {'query': query, 'model_name': model_name, 'params': {'method': 'cove-non-rag'}, 'steps': {}}
+    cove_history = {'query': query, 'model_name': model_name, 'params': {'method': 'cove-rag'}, 'steps': {}}
     
-    # [삭제] RAG Retriever 초기화 삭제
+    # [신규] RAG Retriever 초기화
+    try:
+        retriever = RAGRetriever(config=config)
+    except Exception as e:
+        logging.error(f"RAG Retriever (CoVe) 초기화 실패: {e}", exc_info=True)
+        cove_history['error'] = f"RAG Retriever (CoVe) 초기화 실패: {e}"
+        cove_history['final_output'] = "Error during CoVe initialization."
+        return cove_history
 
     try:
         # --- 1단계: 초기 답변 생성 ---
-        logging.info("  [CoVe 1/4] 초기 답변 생성 중...")
+        logging.info("  [CoVe-RAG 1/4] 초기 답변 생성 중...")
+        # SERC의 prompt_baseline 재사용 (내부 지식으로 생성)
         initial_baseline = prompt_baseline(query, model_name, config)
         cove_history['steps']['1_initial_baseline'] = initial_baseline
         logging.info(f"    CoVe Baseline: {initial_baseline[:100]}...")
 
         # --- 2단계: 검증 계획 수립 ---
-        logging.info("  [CoVe 2/4] 검증 계획 수립 중...")
+        logging.info("  [CoVe-RAG 2/4] 검증 계획 수립 중...")
         plan_prompt = prompts.COVE_PLAN_PROMPT_TEMPLATE.format(
             query=query,
             baseline_response=initial_baseline
@@ -125,21 +156,23 @@ def run_cove(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, A
         }
         logging.info(f"    CoVe Plan: {len(verification_questions)}개 질문 생성됨.")
 
-        # --- 3단계: 검증 실행 (Non-RAG) ---
-        logging.info(f"  [CoVe 3/4] {len(verification_questions)}개 질문 검증 실행 중 (Non-RAG)...")
+        # --- 3단계: 검증 실행 (RAG 사용) ---
+        logging.info(f"  [CoVe-RAG 3/4] {len(verification_questions)}개 질문 RAG 검증 실행 중...")
         verification_results = []
         for q in verification_questions:
-            # [수정] RAG 대신, main_serc (Non-RAG)의 헬퍼 함수 호출
-            answer = _prompt_get_verification_answer(q, model_name, config)
+            # [수정] RAG 검색 수행
+            retrieved_docs = retriever.retrieve(q)
+            # [수정] RAG 기반 답변 생성 헬퍼 호출
+            answer = _cove_get_rag_answer(q, retrieved_docs, model_name, config)
             
-            verification_results.append({'question': q, 'answer': answer})
+            verification_results.append({'question': q, 'answer': answer, 'retrieved_docs': retrieved_docs})
             logging.debug(f"      Q: {q}\n        A: {answer[:100]}...")
         
         cove_history['steps']['3_verification_results'] = verification_results
         logging.info(f"    CoVe Execution: {len(verification_results)}개 답변 완료.")
 
         # --- 4단계: 최종 답변 생성 (수정) ---
-        logging.info("  [CoVe 4/4] 최종 답변 생성 중...")
+        logging.info("  [CoVe-RAG 4/4] 최종 답변 생성 중...")
         evidence_str = _format_qa_evidence(verification_results)
         revise_prompt = prompts.COVE_REVISE_PROMPT_TEMPLATE.format(
             query=query,
@@ -148,7 +181,7 @@ def run_cove(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, A
         )
         final_output_raw = generate(revise_prompt, model_name, config)
         
-        # [수정] _clean_model_output 적용
+        # [수정] _clean_model_output 적용 (SERC와 동일하게)
         final_output_cleaned = _clean_model_output(final_output_raw) 
         
         cove_history['steps']['4_final_output_raw'] = final_output_raw
@@ -156,9 +189,9 @@ def run_cove(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, A
         logging.info(f"    CoVe Final Output: {final_output_cleaned[:100]}...")
 
     except Exception as e:
-        logging.error(f"CoVe (Non-RAG) 실행 중 오류 발생: {e}", exc_info=True)
+        logging.error(f"CoVe-RAG 실행 중 오류 발생: {e}", exc_info=True)
         cove_history['error'] = str(e)
-        cove_history['final_output'] = f"Error during CoVe (Non-RAG): {e}"
+        cove_history['final_output'] = f"Error during CoVe-RAG: {e}"
 
     return cove_history
 
@@ -166,26 +199,26 @@ def run_cove(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, A
 def run_single_item_wrapper(item: Dict[str, Any], model_name: str, config: Dict[str, Any]) -> Dict[str, Any]:
     try:
         query = item.get('question', item.get('query'))
-        cove_history = run_cove(
+        cove_history = run_cove_rag(
             query=query,
             model_name=model_name,
             config=config
         )
         method_result = {'cove_result': cove_history, 'final_output': cove_history.get('final_output', ''), 'status': 'success'}
     except Exception as e:
-        logger.error(f"'{query}' 처리 중 오류 발생 (CoVe): {e}", exc_info=False)
+        logger.error(f"'{query}' 처리 중 오류 발생 (CoVe-RAG): {e}", exc_info=False)
         method_result = {"error": f"Exception during processing: {e}", "status": "error"}
 
     output_item = {
         **item, 
         "method_result": method_result,
-        "method_used": "cove_non_rag" # [수정]
+        "method_used": "cove_rag" # [수정]
     }
     return output_item
 
 # --- 메인 함수 (이 파일을 직접 실행할 경우) ---
 def main():
-    parser = argparse.ArgumentParser(description="Run CoVe (Chain-of-Verification) Experiment (Non-RAG).") # [수정]
+    parser = argparse.ArgumentParser(description="Run CoVe (Chain-of-Verification) Experiment with RAG.") # [수정]
     
     default_config_path = os.path.join(PROJECT_ROOT, "config.yaml")
     parser.add_argument("--config", type=str, default=default_config_path, help="Path to config file.")
@@ -193,7 +226,7 @@ def main():
     parser.add_argument("--model", type=str, required=True, help="Model name (defined in config).")
     parser.add_argument("--dataset", type=str, required=True, help="Dataset name (key in config data_paths).")
     parser.add_argument("--limit", type=int, default=None, help="Limit data points. Default: All")
-    parser.add_argument("--output_dir", type=str, default="results/cove", help="Dir to save results.") # [수정]
+    parser.add_argument("--output_dir", type=str, default="results/cove_rag", help="Dir to save results.") # [수정]
     parser.add_argument("--output_suffix", type=str, default="", help="Optional output filename suffix.")
 
     args = parser.parse_args()
@@ -207,7 +240,7 @@ def main():
         logger.error(f"설정 파일 로드 중 오류 발생: {e}")
         return
         
-    logging.info(f"--- CoVe [NON-RAG] 실험 시작 ---") # [수정]
+    logging.info(f"--- CoVe [RAG] 실험 시작 ---") # [수정]
     logging.info(f"Config: {args.config}")
     logging.info(f"Model: {args.model}")
     logging.info(f"Dataset: {args.dataset} (Limit: {args.limit if args.limit is not None else 'All'})")
@@ -248,18 +281,18 @@ def main():
     
     limit_str = f"_limit{args.limit}" if args.limit else ""
     suffix_str = f"_{args.output_suffix}" if args.output_suffix else ""
-    output_filename = f"cove_non_rag{limit_str}{suffix_str}_{timestamp}.jsonl" # [수정]
+    output_filename = f"cove_rag{limit_str}{suffix_str}_{timestamp}.jsonl" # [수정]
     output_path = os.path.join(results_dir, output_filename)
     logging.info(f"결과는 다음 경로에 저장됩니다: {output_path}")
 
     results = []
-    for item in tqdm(data, desc=f"CoVe (Non-RAG)"): # [수정]
+    for item in tqdm(data, desc=f"CoVe (RAG)"): # [수정]
         result_item = run_single_item_wrapper(item=item, model_name=args.model, config=config)
         results.append(result_item)
     
     try:
         save_jsonl(results, output_path)
-        logging.info(f"\n--- CoVe [NON-RAG] 실험 완료. 총 {len(results)}개의 결과가 {output_path}에 저장되었습니다. ---") # [수정]
+        logging.info(f"\n--- CoVe [RAG] 실험 완료. 총 {len(results)}개의 결과가 {output_path}에 저장되었습니다. ---") # [수정]
     except Exception as e:
         logger.error(f"최종 결과 저장 실패: {e}", exc_info=True)
 
