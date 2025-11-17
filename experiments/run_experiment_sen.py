@@ -253,7 +253,13 @@ def prompt_judge_entity_consistency(desc_a: str, desc_b: str, model_name: str, c
     if match:
         result = match.group(1)
         logging.info(f"  [1.5d] CoT 판단: '{result}'")
-        return result == "[yes]" or "yes"
+        if result == "[yes]" or result == "yes":
+            return True  # 일치함 (Consistent)
+        elif result == "[no]" or result == "no":
+            return False # 불일치/충돌 (Contradictory)
+        else:
+            logging.warning(f"  [1.5d] CoT 판단이 정규식과 다름: '{result}'. 충돌로 간주.")
+            return False # Default to False (충돌)
     else:
         logging.warning(f"  [1.5d] CoT 파싱 실패. startswith로 Fallback: {cleaned[:50]}...")
         if cleaned.startswith("[yes]") or cleaned.startswith("yes"):
@@ -338,31 +344,44 @@ def SERC_FactInSentence_Iterative(query: str, model_name: str, config: Dict[str,
         rag_desc = prompt_extract_rag_desc(query, rag_context, model_name, config)
         logging.info(f"  [1.5c] RAG 개체(RAG_Desc): '{rag_desc}'")
 
-        # 4. 계층적 교정 결정
-        if query_desc: # [Case C] 쿼리가 명시적일 때
+# 4. 계층적 교정 결정
+        is_query_ambiguous = (not query_desc) or query_desc.lower().endswith("(none)")
+
+        if not is_query_ambiguous:
+            # [Case C] 쿼리가 명시적일 때 (e.g., "Paris (Capital)")
+            logging.info(f"  [1.5d] [Case C] 쿼리가 명시적({query_desc}). RAG({rag_desc})와 일관성 검사.")
             if not prompt_judge_entity_consistency(query_desc, rag_desc, model_name, config):
                 logging.warning(f"  [1.5d] [Case C] 쿼리({query_desc})와 RAG({rag_desc}) 충돌. 쿼리를 존중(A안)합니다.")
                 rag_context_override = f"Context: This query is specifically about {query_desc}."
             else:
-                 logging.info(f"  [1.5d] [Case A] 쿼리와 RAG 일치. 정상 진행.")
-            main_subject = model_desc.split('(', 1)[0]
-            main_subject = main_subject.strip()
-        
-        else: # [Case A/B] 쿼리가 모호할 때 
+                logging.info(f"  [1.5d] [Case C] 쿼리와 RAG 일치. 정상 진행.")
+            main_subject = model_desc.split('(', 1)[0].strip()
+
+        else:
+            if not query_desc:
+                logging.info(f"  [1.5d] [Case A/B] 쿼리가 모호함 (추출된 개체 없음). RAG 기반으로 진행.")
+            else:
+                logging.info(f"  [1.5d] [Case A/B] 쿼리가 모호함 ({query_desc} 반환). RAG 기반으로 진행.")
+
             if model_desc and rag_desc and not prompt_judge_entity_consistency(model_desc, rag_desc, model_name, config):
                 logging.warning(f"  [1.5d] [Case B] 모델({model_desc})과 RAG({rag_desc}) 충돌. '적극적 개체 교정(B안)' 실행.")
+                logging.info(f"  [1.5d] [Case B] 메인 주제를 RAG 개체({rag_desc})로 설정.")
                 current_baseline = prompt_regenerate_baseline_rag(query, rag_context, model_name, config)
                 logging.info(f"  [1.6] 베이스라인 재생성 완료 (길이: {len(current_baseline)}자)")
-                main_subject = rag_desc.split('(', 1)[0]
-                main_subject = main_subject.strip()
+                main_subject = rag_desc.split('(', 1)[0].strip() # 메인 주제를 RAG로 설정
             else:
-                logging.info(f"  [1.5d] [Case A] 모델과 RAG 일치 (또는 정보 부족). 정상 진행.")
-                main_subject = model_desc if model_desc else (rag_desc.split('(', 1)[0] if rag_desc else query) # 모델/RAG/쿼리 순으로 주제 확정
-                main_subject = main_subject.strip()
+                if model_desc and rag_desc:
+                    logging.info(f"  [1.5d] [Case A] 모델({model_desc})과 RAG({rag_desc}) 일치.")
+                else:
+                    logging.info(f"  [1.5d] [Case A] 모델/RAG 정보 부족. 비교 없이 진행.")
+                logging.info(f"  [1.5d] [Case A] 메인 주제를 기존 모델 개체({model_desc})로 유지.")
+                main_subject = model_desc.split('(', 1)[0].strip() # 메인 주제를 모델로 유지
 
         if not main_subject: 
-            main_subject = query.split('(', 1)[0]
+            logging.warning(f"  [1.5e] 메인 주제(main_subject)가 비어있음 (e.g., Case A에서 model_desc가 비었음). Fallback 실행.")             
+            main_subject = rag_desc.split('(', 1)[0].strip() if rag_desc else query.split('(', 1)[0].strip()
             main_subject = main_subject.strip()
+
         logging.info(f" 메인 주제(main_subject) 확정: '{main_subject}'")
 
     except Exception as e:

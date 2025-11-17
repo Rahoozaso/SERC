@@ -16,14 +16,33 @@ BASELINE_PROMPT_TEMPLATE_PN = """[INSTRUCTION] Your task is to answer the user's
 {query}
 [RESPONSE] """
 
-QUERY_ENTITY_EXTRACTOR_TEMPLATE = """[INSTRUCTION] Identify the main subject's **Name** and its **Characteristic** (e.g., type, location, or occupation) from the [USER QUERY].
-Respond ONLY in "Name (Characteristic)" format.
-If no characteristic is given, respond with "Name (None)".
+QUERY_ENTITY_EXTRACTOR_TEMPLATE = """[INSTRUCTION] Your task is to extract a subject's **Name** and its **Characteristic** from the [USER QUERY].
+
+**CRITICAL RULES:**
+1.  Only extract characteristics **explicitly stated** in the query (e.g., "capital", "president").
+2.  **DO NOT infer characteristics** or use your general knowledge. If the query only gives a name (like "Albert Einstein"), the characteristic is "None".
+3.  Respond ONLY in the exact "Name (Characteristic)" format.
+
+[EXAMPLES]
+[USER QUERY]
+What is the capital of France?
+[RESPONSE]
+Paris (Capital)
+
+[USER QUERY]
+Tell me about Albert Einstein
+[RESPONSE]
+Albert Einstein (None)
+
+[USER QUERY]
+Who is Joe Biden, the president?
+[RESPONSE]
+Joe Biden (president)
 
 [TASK]
 [USER QUERY]
 {query}
-[RESPONSE] 
+[RESPONSE]
 """
 
 
@@ -124,12 +143,14 @@ def generate_group_question_prompt(tag: str, fact_texts_list: List[str]) -> str:
     return prompt
 
 def generate_sentence_group_question_prompt(fact_texts_list: List[str]) -> str:
+    prompt = "[INSTRUCTION] Your goal is to create **one single verification question** that **synthesizes** and **links** all facts from the [LIST OF FACTS].\n"
+    prompt += "**CRITICAL RULE: The answer to your question MUST require knowing ALL of the facts.**\n"
+    prompt += "A question that can be answered using only *one* of the facts is WRONG.\n"
+    prompt += "Avoid simple Yes/No questions. Start with 'What', 'Who', 'When', 'Where', etc.\n"
     
-    prompt = "[INSTRUCTION] Your goal is to create one single, specific, and comprehensive verification question.\n"
-    prompt += "**Crucially, the answer to this question must require ALL information from the [LIST OF FACTS] to be correct.**\n"
-    prompt += "Your question should ideally start with 'What', 'Who', 'When', 'Where', or 'How'. Avoid simple Yes/No questions.\n"
     
-    prompt += "[TASK]\n"
+    # [기존] 실제 태스크 부분
+    prompt += "\n[TASK]\n"
     prompt += "[LIST OF FACTS TO VERIFY]\n"
     if fact_texts_list:
         for f_text in fact_texts_list:
@@ -214,24 +235,46 @@ Tom Hanks was born in 1956.
 [CORRECTED FACT] """
 
 # 3.5. (3) Propagate Belief
-REWRITE_SENTENCE_TEMPLATE = """[CRITICAL INSTRUCTION] Your task is to seamlessly integrate the [CORRECTED FACT] into the structure of the [ORIGINAL SENTENCE].
-1. Preserve the original sentence's style and subject reference.
-2. The final output must be **ONLY the rewritten sentence**.
+REWRITE_SENTENCE_TEMPLATE = """[CRITICAL INSTRUCTION] Your task is to **correct** the [ORIGINAL SENTENCE] using the [CORRECTED FACT].
+1.  The [REWRITTEN SENTENCE] must reflect the information in the [CORRECTED FACT].
+2.  **Crucially: You MUST REMOVE any parts** of the [ORIGINAL SENTENCE] that contradict or are made false by the [CORRECTED FACT].
+3.  Preserve the original sentence's style (e.g., "She..." vs "{main_subject}...").
+4.  The final output must be **ONLY the rewritten sentence**.
 
-[EXAMPLE]
+[MAIN SUBJECT CONTEXT]
+{main_subject}
+
+[EXAMPLE 1: Substitution]
 [ORIGINAL SENTENCE]
-The actor, born in 1957, starred in "Forrest Gump".
+The actor, born in 1957, starred in a famous movie.
 [CORRECTED FACT]
-Tom Hanks was born in 1956.
+The actor was born in 1956.
 [REWRITTEN SENTENCE]
-The actor, born in 1956, starred in "Forrest Gump".
+The actor, born in 1956, starred in a famous movie.
+
+[EXAMPLE 2: Explicit Deletion of Error]
+[ORIGINAL SENTENCE]
+She worked as a teacher and later became a painter.
+[CORRECTED FACT]
+Her career path was teaching, then she became a lawyer. (She was not a painter).
+[REWRITTEN SENTENCE]
+She worked as a teacher and later became a lawyer.
+
+[EXAMPLE 3: Deletion by Omission (Important!)]
+[ORIGINAL SENTENCE]
+She worked as a teacher and later became a painter.
+[CORRECTED FACT]
+She worked as a teacher.
+[REWRITTEN SENTENCE]
+She worked as a teacher.
 
 [TASK]
 [ORIGINAL SENTENCE]
 {bad_sentence}
 [CORRECTED FACT]
 {correct_fact_text}
-[REWRITTEN SENTENCE] """
+[REWRITTEN SENTENCE]
+"""
 
 RECOMPOSE_PROMPT_TEMPLATE = """
 [Context]
@@ -376,17 +419,23 @@ List **only the most important and non-overlapping** facts.
 Your list must contain a **strict maximum of 3** facts. Do not exceed 3.
 Do not list redundant combinations of other facts.
 
-**CRITICAL RULE: Replace any pronouns (e.g., 'She', 'He', 'Her') that refer to the [MAIN SUBJECT] with "{main_subject}". If a fact is about a *different* subject, state it as is.**
+**CRITICAL RULE: Replace any pronouns (e.g., 'She', 'He', 'Her','Him') that refer to the [MAIN SUBJECT] with "{main_subject}". If a fact is about a *different* subject, state it as is.**
 
-[SENTENCE] The event, organized by Alice, will happen at 10 AM.
+[MAIN SUBJECT]: Marie Curie
+[SENTENCE]: She was born in Warsaw, which is the capital of Poland.
 [LIST OF FACTS]
-- The event was organized by Alice.
-- The event will happen at 10 AM.
+- Marie Curie was born in Warsaw.
+- Warsaw is the capital of Poland.
 
-[SENTENCE] She graduated from the University of Montreux in Switzerland.
+[MAIN SUBJECT]: Albert Einstein
+[SENTENCE]: He is famous for developing the theory of relativity.
 [LIST OF FACTS]
-- {main_subject} graduated from the University of Montreux.
-- The University of Montreux is located in Switzerland.
+- Albert Einstein is famous for developing the theory of relativity.
+
+[MAIN SUBJECT]: Marie Curie
+[SENTENCE]: Her husband was Pierre Curie.
+[LIST OF FACTS]
+- Marie Curie's husband was Pierre Curie.
 
 [SENTENCE]
 {sentence}

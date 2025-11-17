@@ -15,7 +15,7 @@ class RAGRetriever:
             # raise ValueError("TAVILY_API_KEY가 필요합니다.")
         
         rag_config = config.get('rag_config', {})
-        self.top_k = rag_config.get('rag_top_k_results', 10) 
+        self.top_k = rag_config.get('rag_top_k_results', 8) 
 
         try:
             # [수정] WikipediaRetriever 대신 TavilySearchAPIRetriever를 사용합니다.
