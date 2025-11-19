@@ -54,7 +54,26 @@ def prompt_baseline(query: str, model_name: str, config: dict) -> str:
 def prompt_extract_facts_from_sentence(sentence: str, model_name: str, config: dict, main_subject: str) -> str:
     """Step 2: Extract Facts from a Sentence"""
     prompt = prompts.EXTRACT_FACTS_TEMPLATE_PN.format(sentence=sentence, main_subject=main_subject)
-    return generate(prompt, model_name, config)
+    
+    # 1. 모델 생성
+    raw_response = generate(prompt, model_name, config)
+    
+    # 2. [ANSWER] 태그 기반 잘라내기 (후처리)
+    clean_text = raw_response
+    
+    # 잘라낼 태그 목록 (대문자, 소문자, 변형 등)
+    stop_tags = ["[ANSWER]", "[Answer]", "Answer:", "[answer]"]
+    
+    for tag in stop_tags:
+        idx = clean_text.find(tag)
+        if idx != -1:
+            # 태그가 발견되면 그 앞부분만 취함
+            clean_text = clean_text[:idx]
+            # (선택사항) 디버깅용 로그
+            # logging.debug(f"[Fact Extraction] '{tag}' 태그 감지. 뒷부분 제거함.")
+            break # 가장 먼저 나오는 태그에서 자르고 루프 종료
+            
+    return clean_text.strip()
 
 def _clean_model_output(raw_response: str) -> str:
     if not raw_response: return ""
