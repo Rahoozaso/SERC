@@ -36,7 +36,8 @@ Respond ONLY in "Name (Characteristic)" format.
 [RESPONSE]
 """
 
-RAG_DOMINANT_ENTITY_TEMPLATE = """[INSTRUCTION] Read the [SEARCH RESULTS] and identify the main subject's **Name** and **Dominant Characteristic**.
+RAG_DOMINANT_ENTITY_TEMPLATE = """[INSTRUCTION] You are a fact-checker. Read the [SEARCH RESULTS] about the [QUERY].
+Identify the main subject's **Proper Noun (Name)** and its single **most dominant Characteristic** (e.g., type, location, or occupation).
 Respond ONLY in "Name (Characteristic)" format.
 
 [TASK]

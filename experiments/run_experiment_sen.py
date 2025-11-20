@@ -287,8 +287,10 @@ def SERC_FactInSentence_Iterative(query: str, model_name: str, config: Dict[str,
                         logging.info(f"    [CONTRADICTED] {ftext}")
                         syndrome[fid] = {'fact_text': ftext, 'original_sentence': sent_text, 'evidence_docs': context}
                         if fid in final_verified_facts_map: del final_verified_facts_map[fid]
+                    elif judgment == "NOT_FOUND":
+                        if fid in final_verified_facts_map: del final_verified_facts_map[fid]
 
-        cycle_log['steps']['2_verification'] = validation_details
+        cycle_log['steps']['3_verification'] = validation_details
         
         # 2c. Correction
         if not syndrome:
