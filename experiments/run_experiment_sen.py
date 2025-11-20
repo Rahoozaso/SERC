@@ -77,14 +77,24 @@ def prompt_extract_facts_from_sentence(sentence: str, model_name: str, config: d
 
 def prompt_validate_one_fact_against_evidence(fact_text: str, evidence_text: str, model_name: str, config: dict) -> str:
     prompt = prompts.VALIDATE_EVIDENCE_TEMPLATE.format(fact_text=fact_text, evidence_text=evidence_text)
-    raw = generate(prompt, model_name, config)
+    validation_params = {"temperature": 0.1, "max_new_tokens": 256} # 100~200 토큰에서 256 토큰으로 증가
+
+    # generate 함수 호출 시 파라미터 오버라이드 사용
+    raw = generate(prompt, model_name, config, generation_params_override=validation_params)
+    
     judgment = _extract_xml_tag(raw, "judgment").upper()
+    
+    # XML 태그 내 판단 확인 (가장 확실한 방법)
     if "CONTRADICTED" in judgment: return "CONTRADICTED"
     if "SUPPORTED" in judgment: return "SUPPORTED"
     if "NOT_FOUND" in judgment: return "NOT_FOUND"
+    
+    # XML 태그 추출 실패 시, 일반 텍스트에서 판단 확인 (Fallback)
     upper_raw = raw.upper()
     if "CONTRADICTED" in upper_raw: return "CONTRADICTED"
     if "SUPPORTED" in upper_raw: return "SUPPORTED"
+    
+    # 모든 확인 실패 시 최종적으로 NOT_FOUND 반환
     return "NOT_FOUND"
 
 def prompt_generate_correct_fact(fact_text: str, model_name: str, config: dict, context: str) -> str:
@@ -127,7 +137,8 @@ def prompt_recompose(query: str, final_facts_map: Dict[str, str], model_name: st
     fact_list_str = "\n".join([f"- {f}" for f in fact_texts])
     prompt = prompts.RECOMPOSE_PROMPT_TEMPLATE.format(query=query, fact_list_str=fact_list_str)
     raw = generate(prompt, model_name, config)
-    return _clean_model_output(raw)
+    res = _extract_xml_tag(raw, "final_response")
+    return res if res else _clean_model_output(raw)
 
 # --- Entity Helpers ---
 def prompt_extract_entity_desc(text: str, model_name: str, config: dict, is_query: bool = False) -> str:
@@ -154,11 +165,6 @@ def prompt_extract_rag_desc(query: str, context: str, model_name: str, config: d
     return ""
 
 def prompt_judge_entity_consistency(desc_a: str, desc_b: str, model_name: str, config: dict) -> bool:
-    # Soft Match
-    name_a = desc_a.split('(')[0].strip().lower()
-    name_b = desc_b.split('(')[0].strip().lower()
-    if name_a in name_b or name_b in name_a: return True
-    
     prompt = prompts.ENTITY_CONSISTENCY_JUDGE_TEMPLATE.format(desc_a=desc_a, desc_b=desc_b)
     raw = generate(prompt, model_name, config)
     judgment = _extract_xml_tag(raw, "judgment").upper()

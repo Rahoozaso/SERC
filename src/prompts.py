@@ -72,10 +72,11 @@ BASELINE_PROMPT_TEMPLATE_RAG_FIRST = """[INSTRUCTION] Answer the user's question
 
 # --- 3. Fact Extraction (XML Output) ---
 EXTRACT_FACTS_TEMPLATE_PN = """[INSTRUCTION] Break down the [SENTENCE] into **Atomic Facts** about [{main_subject}].
-1. Each fact must be a single, independent statement.
-2. Replace pronouns (He/She/It) with "{main_subject}".
-3. Do NOT merge multiple facts.
-4. Output facts inside <facts> tags.
+1. **Minimum Unit Rule:** Each fact MUST contain a complete Subject-Verb-Object (SVO) structure. Do NOT separate the subject's role, birth year, or main action into separate facts if they are essential to defining the core event.
+2. **Cohesion Rule:** A fact should be separated ONLY IF it introduces a new person, new time period, or a new main action.
+3. **Pronoun Replacement:** Replace all pronouns (He/She/It) with "{main_subject}".
+4. **No Merging:** Do NOT merge multiple independent events into one fact.
+5. **Output Format:** Output facts inside <facts> tags.
 
 [SENTENCE]
 {sentence}
@@ -202,14 +203,24 @@ REWRITE_SENTENCE_TEMPLATE = """[INSTRUCTION] Rewrite the [ORIGINAL SENTENCE] to 
 [RESPONSE]
 """
 
-RECOMPOSE_PROMPT_TEMPLATE = """[INSTRUCTION] Synthesize a final response based on the [VALID FACTS].
-Ignore any facts marked as invalid. Write a coherent paragraph.
+RECOMPOSE_PROMPT_TEMPLATE = """[INSTRUCTION] Synthesize a final response based ONLY on the [VALID FACTS].
+Ignore any facts marked as invalid or unverified. Write a single, coherent paragraph.
+
+## CRITICAL RULE
+1. The entire final biography MUST be wrapped in the <final_response> tag.
+2. DO NOT include any commentary, notes, or explanations outside the tag.
+3. DO NOT use bullets or numbered lists in the final response.
 
 [ORIGINAL QUERY]
 {query}
 
 [VALID FACTS]
 {fact_list_str}
+
+[RESPONSE FORMAT]
+<final_response>
+[Coherent paragraph containing only the verified facts]
+</final_response>
 
 [RESPONSE]
 """
