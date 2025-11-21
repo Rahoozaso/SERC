@@ -149,14 +149,16 @@ def prompt_reconstruct_local_sentence(original_sentence: str, updated_facts: Lis
     )
     raw = generate(prompt, model_name, config,
                    generation_params_override={"temperature": 0.3, "max_new_tokens": 512})
+    modified_raw = f"<generated_sentence>{raw}"
     # XML 태그 추출
-    return _extract_xml_tag(raw, "generated_sentence") or _clean_model_output(raw)
+    return _extract_xml_tag(modified_raw, "generated_sentence") or _clean_model_output(modified_raw)
 
 def prompt_global_polish(query: str, draft_text: str, model_name: str, config: dict) -> str:
     prompt = GLOBAL_POLISH_TEMPLATE.format(query=query, draft_text=draft_text)
     raw = generate(prompt, model_name, config,
                    generation_params_override={"temperature": 0.5, "max_new_tokens": 1024})
-    return _extract_xml_tag(raw, "final_response") or _clean_model_output(raw)
+    modified_raw = f"<final_response>{raw}"
+    return _extract_xml_tag(modified_raw, "final_response") or _clean_model_output(modified_raw)
 
 # =============================================================================
 # Batch Processing Functions (Detection & Correction Split)
@@ -204,10 +206,6 @@ def _detect_syndromes_batch(sentence_batches: List[Dict],
 def _correct_syndromes_batch(syndromes_buffer: List[Dict], 
                              model_name: str, 
                              config: Dict) -> Dict[str, str]:
-    """
-    [Phase 2] BP Correction with XML Parsing
-    XML 포맷을 사용하여 8B 모델의 출력 안정성을 확보합니다.
-    """
     fact_correction_map = {}
     
     if not syndromes_buffer:
@@ -247,8 +245,6 @@ def _correct_syndromes_batch(syndromes_buffer: List[Dict],
                 # 태그 안의 텍스트 추출 및 정리
                 clean_orig = orig_match.group(1).strip()
                 clean_corr = fixed_match.group(1).strip()
-                
-                # "1. " 같은 번호나 하이픈이 딸려오면 제거
                 clean_orig = re.sub(r'^[\d\-\.\)\s]+', '', clean_orig)
                 
                 if clean_orig and clean_corr:
@@ -358,19 +354,14 @@ def SERC(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, Any]:
         has_changes = False  # [최적화] 변경 사항 감지 플래그
         
         for f in old_facts:
-            # 1. BP로 수정된 팩트가 있는가?
             if f in fact_correction_map:
                 updated_facts_list.append(fact_correction_map[f])
                 has_changes = True  # 변경 발생!
-            # 2. 없으면 원본 유지
             else:
                 updated_facts_list.append(f)
-        
-        # [최적화 로직]
-        # 변경된 사실이 하나도 없다면? -> API 호출하지 말고 원문 그대로 사용
         if not has_changes:
             local_sentences.append(orig_sent)
-            logging.info(f"⏩ Skipped Reconstruction (No Errors): {orig_sent[:30]}...")
+            logging.info(f" Skipped Reconstruction (No Errors): {orig_sent[:30]}...")
             continue
             
         # 변경된 사실이 있다면? -> 새로 생성 (Generate from Scratch)
