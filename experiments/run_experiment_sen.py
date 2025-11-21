@@ -2,11 +2,12 @@ import argparse
 import os
 import sys
 import logging
+import re
 from typing import Dict, Any, List, Optional
-import re 
-import traceback
+from collections import defaultdict # [수정] 올바른 import 방식
 from tqdm import tqdm
 
+# --- Project path setup ---
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(PROJECT_ROOT)
 sys.path.append(os.path.join(PROJECT_ROOT, "src"))
@@ -15,372 +16,436 @@ try:
     from src import programmatic_helpers as ph
     from src.utils import load_config, save_jsonl, get_timestamp
     from src.data_loader import load_dataset
-    from src import prompts 
+    from src.model_wrappers import generate
+    from src.rag_retriever import RAGRetriever
+
     from src.prompts import (
         generate_sentence_group_question_prompt,
         VERIFICATION_ANSWER_TEMPLATE_RAG,
-        VALIDATE_EVIDENCE_TEMPLATE, 
-        CORRECT_FACT_TEMPLATE_RAG, 
-        RECOMPOSE_PROMPT_TEMPLATE, 
-        BASELINE_PROMPT_TEMPLATE_PN, 
-        EXTRACT_FACTS_TEMPLATE_PN, 
-        REWRITE_SENTENCE_TEMPLATE,
+        VALIDATE_EVIDENCE_TEMPLATE,
+        CORRECT_FACT_TEMPLATE_RAG,
+        BASELINE_PROMPT_TEMPLATE_PN,
+        EXTRACT_FACTS_TEMPLATE_PN,
         QUERY_ENTITY_EXTRACTOR_TEMPLATE,
         BASELINE_ENTITY_EXTRACTOR_TEMPLATE,
         RAG_DOMINANT_ENTITY_TEMPLATE,
         ENTITY_CONSISTENCY_JUDGE_TEMPLATE,
-        BASELINE_PROMPT_TEMPLATE_RAG_FIRST
+        BASELINE_PROMPT_TEMPLATE_RAG_FIRST,
+        RECONSTRUCT_LOCAL_SENTENCE_TEMPLATE,
+        GLOBAL_POLISH_TEMPLATE,
+        BP_CORRECTION_TEMPLATE  # [확인] src/prompts.py에 정의되어 있어야 함
     )
-    from src.model_wrappers import generate 
-    from src.rag_retriever import RAGRetriever 
-    
-except ImportError:
-    logging.error("ImportError: Check PYTHONPATH.")
+except ImportError as e:
+    logging.error(f"ImportError: {e}. Check your src/ folder and PYTHONPATH.")
     sys.exit(1)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# --- XML Parsing Helper ---
+# =============================================================================
+# Helper Functions: String & Formatting
+# =============================================================================
+
 def _extract_xml_tag(text: str, tag: str) -> str:
-    if not text: return ""
+    if not text:
+        return ""
     pattern = f"<{tag}>(.*?)</{tag}>"
     match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
     if match:
         return match.group(1).strip()
+    close_tag = f"</{tag}>"
+    if close_tag in text:
+        return text.split(close_tag)[0].strip()
     return ""
 
-def _clean_model_output(raw_response: str) -> str:
-    if not raw_response: return ""
-    line = re.sub(r'#.*$', '', raw_response).strip()
-    line = re.sub(r'\[.*?\]$', '', line).strip()
-    return line.strip().strip('"').strip("'")
+def _clean_model_output(raw: str) -> str:
+    if not raw:
+        return ""
+    if "</" in raw:
+        raw = raw.split("</")[0]
+    stop_patterns = ["[END", "[/FINAL", "[ANSWER", "[SOLUTION"]
+    for pat in stop_patterns:
+        if pat in raw:
+            if raw.find(pat) > 5: 
+                raw = raw.split(pat)[0]
+    cleaned = re.sub(r'#.*$', '', raw, flags=re.MULTILINE) 
+    return cleaned.strip().strip('"').strip("'")
 
-
-# --- Wrappers ---
+# =============================================================================
+# Helper Functions: LLM Prompts
+# =============================================================================
 
 def prompt_baseline(query: str, model_name: str, config: dict) -> str:
-    prompt = prompts.BASELINE_PROMPT_TEMPLATE_PN.format(query=query)
+    prompt = BASELINE_PROMPT_TEMPLATE_PN.format(query=query)
+    return generate(prompt, model_name, config)
+
+def prompt_extract_entity_desc(text: str, model_name: str, config: dict, is_query: bool = False) -> str:
+    template = QUERY_ENTITY_EXTRACTOR_TEMPLATE if is_query else BASELINE_ENTITY_EXTRACTOR_TEMPLATE
+    prompt = template.format(query=text) if is_query else template.format(baseline_text=text)
+    raw = generate(prompt, model_name, config)
+    match = re.search(r"(.+?)\s*\(([^)]+)\)", raw)
+    if match and len(match.group(1).split()) <= 6:
+        return f"{match.group(1).strip()} ({match.group(2).strip()})"
+    return ""
+
+def prompt_extract_rag_desc(query: str, context: str, model_name: str, config: dict) -> str:
+    prompt = RAG_DOMINANT_ENTITY_TEMPLATE.format(query=query, context=context)
+    raw = generate(prompt, model_name, config)
+    match = re.search(r"(.+?)\s*\(([^)]+)\)", raw)
+    if match:
+        return f"{match.group(1).strip()} ({match.group(2).strip()})"
+    return ""
+
+def prompt_judge_entity_consistency(a: str, b: str, model_name: str, config: dict) -> bool:
+    prompt = ENTITY_CONSISTENCY_JUDGE_TEMPLATE.format(desc_a=a, desc_b=b)
+    raw = generate(prompt, model_name, config)
+    return "YES" in _extract_xml_tag(raw, "judgment").upper() or "YES" in raw.upper()
+
+def prompt_regenerate_baseline_rag(query: str, context: str, model_name: str, config: dict) -> str:
+    prompt = BASELINE_PROMPT_TEMPLATE_RAG_FIRST.format(context=context, query=query)
     return generate(prompt, model_name, config)
 
 def prompt_extract_facts_from_sentence(sentence: str, model_name: str, config: dict, main_subject: str) -> List[str]:
-    prompt = prompts.EXTRACT_FACTS_TEMPLATE_PN.format(sentence=sentence, main_subject=main_subject)
+    prompt = EXTRACT_FACTS_TEMPLATE_PN.format(sentence=sentence, main_subject=main_subject)
     raw = generate(prompt, model_name, config)
     facts = re.findall(r"<fact>(.*?)</fact>", raw, re.DOTALL | re.IGNORECASE)
-    cleaned_facts = [f.strip() for f in facts if f.strip()]
-    if not cleaned_facts: 
-        lines = raw.strip().split('\n')
-        for line in lines:
-            if line.strip().startswith('- '):
-                cleaned_facts.append(line.strip()[2:].strip())
-    return cleaned_facts
+    facts = [f.strip() for f in facts if f.strip()]
+    if not facts:
+        facts = [line[2:].strip() for line in raw.split('\n') if line.strip().startswith('- ')]
+    return facts
 
-def prompt_validate_one_fact_against_evidence(fact_text: str, evidence_text: str, model_name: str, config: dict) -> str:
-    prompt = prompts.VALIDATE_EVIDENCE_TEMPLATE.format(fact_text=fact_text, evidence_text=evidence_text)
-    validation_params = {"temperature": 0.1, "max_new_tokens": 256} # 100~200 토큰에서 256 토큰으로 증가
-
-    # generate 함수 호출 시 파라미터 오버라이드 사용
-    raw = generate(prompt, model_name, config, generation_params_override=validation_params)
-    
-    judgment = _extract_xml_tag(raw, "judgment").upper()
-    
-    # XML 태그 내 판단 확인 (가장 확실한 방법)
-    if "CONTRADICTED" in judgment: return "CONTRADICTED"
-    if "SUPPORTED" in judgment: return "SUPPORTED"
-    if "NOT_FOUND" in judgment: return "NOT_FOUND"
-    
-    # XML 태그 추출 실패 시, 일반 텍스트에서 판단 확인 (Fallback)
-    upper_raw = raw.upper()
-    if "CONTRADICTED" in upper_raw: return "CONTRADICTED"
-    if "SUPPORTED" in upper_raw: return "SUPPORTED"
-    
-    # 모든 확인 실패 시 최종적으로 NOT_FOUND 반환
-    return "NOT_FOUND"
-
-def prompt_generate_correct_fact(fact_text: str, model_name: str, config: dict, context: str) -> str:
-    prompt = prompts.CORRECT_FACT_TEMPLATE_RAG.format(fact_text=fact_text, context=context)
+def _prompt_generate_question_for_sentence_group(facts: List[str], model_name: str, config: dict, main_subject: str) -> str:
+    prompt = generate_sentence_group_question_prompt(facts)
     raw = generate(prompt, model_name, config)
-    res = _extract_xml_tag(raw, "corrected_fact")
-    return res if res else _clean_model_output(raw)
-
-def prompt_rewrite_sentence(bad_sentence: str, correct_fact_text: str, model_name: str, config: dict, main_subject: str) -> str:
-    prompt = prompts.REWRITE_SENTENCE_TEMPLATE.format(bad_sentence=bad_sentence, correct_fact_text=correct_fact_text)
-    raw = generate(prompt, model_name, config)
-    res = _extract_xml_tag(raw, "rewritten_sentence")
-    return res if res else _clean_model_output(raw)
-
-def _prompt_generate_question_for_sentence_group(fact_texts_list: List[str], model_name: str, config: dict, main_subject_info: str) -> str:
-    prompt = prompts.generate_sentence_group_question_prompt(fact_texts_list)
-    question_params = {"temperature": 0.1, "max_new_tokens": 100}
-    raw_response = generate(prompt, model_name, config, generation_params_override=question_params)
-    generated_query = _extract_xml_tag(raw_response, "query")
-    if not generated_query:
-        clean_text = raw_response
-        tags = ["[SENTENCE]", "[INSTRUCTION]", "[ANSWER]"]
-        for t in tags:
-            if t in clean_text: clean_text = clean_text.split(t)[0]
-        generated_query = clean_text.strip()
-    
-    # [Query Concatenation]
-    clean_subject_info = main_subject_info[:100] if main_subject_info else ""
-    final_query = f"{generated_query} {clean_subject_info}"
-    return final_query
+    q = _extract_xml_tag(raw, "query")
+    return q if q else f"{_clean_model_output(raw)} {main_subject}"
 
 def _prompt_get_verification_answer(question: str, model_name: str, config: dict, context: str) -> str:
     prompt = VERIFICATION_ANSWER_TEMPLATE_RAG.format(query=question, context=context)
     raw = generate(prompt, model_name, config)
     return _clean_model_output(raw)
 
-def prompt_recompose(query: str, final_facts_map: Dict[str, str], model_name: str, config: dict) -> str:
-    fact_texts = list(final_facts_map.values())
-    if not fact_texts: return "N/A"
-    fact_list_str = "\n".join([f"- {f}" for f in fact_texts])
-    prompt = prompts.RECOMPOSE_PROMPT_TEMPLATE.format(query=query, fact_list_str=fact_list_str)
-    raw = generate(prompt, model_name, config)
-    res = _extract_xml_tag(raw, "final_response")
-    return res if res else _clean_model_output(raw)
-
-# --- Entity Helpers ---
-def prompt_extract_entity_desc(text: str, model_name: str, config: dict, is_query: bool = False) -> str:
-    prompt = prompts.QUERY_ENTITY_EXTRACTOR_TEMPLATE.format(query=text) if is_query else prompts.BASELINE_ENTITY_EXTRACTOR_TEMPLATE.format(baseline_text=text)
-    raw = generate(prompt, model_name, config)
-    match = re.search(r"(.+?)\s*\(([^)]+)\)", raw)
-    if match:
-        name = match.group(1).strip()
-        if name.startswith("def ") or "extract" in name.lower(): return ""
-        char = match.group(2).strip()
-        if len(name.split()) > 6: return ""
-        return f"{name} ({char})"
-    return ""
-
-def prompt_extract_rag_desc(query: str, context: str, model_name: str, config: dict) -> str:
-    prompt = prompts.RAG_DOMINANT_ENTITY_TEMPLATE.format(query=query, context=context)
-    raw = generate(prompt, model_name, config)
-    match = re.search(r"(.+?)\s*\(([^)]+)\)", raw)
-    if match:
-        name = match.group(1).strip()
-        char = match.group(2).strip()
-        if len(name.split()) > 6: return ""
-        return f"{name} ({char})"
-    return ""
-
-def prompt_judge_entity_consistency(desc_a: str, desc_b: str, model_name: str, config: dict) -> bool:
-    prompt = prompts.ENTITY_CONSISTENCY_JUDGE_TEMPLATE.format(desc_a=desc_a, desc_b=desc_b)
-    raw = generate(prompt, model_name, config)
+def prompt_validate_one_fact_against_evidence(fact: str, evidence: str, model_name: str, config: dict) -> str:
+    prompt = VALIDATE_EVIDENCE_TEMPLATE.format(fact_text=fact, evidence_text=evidence)
+    raw = generate(prompt, model_name, config,
+                   generation_params_override={"temperature": 0.1, "max_new_tokens": 512})
     judgment = _extract_xml_tag(raw, "judgment").upper()
-    if "YES" in judgment: return True
-    if "NO" in judgment: return False
-    if "YES" in raw.upper(): return True
-    return False
+    if "CONTRADICTED" in judgment: return "CONTRADICTED"
+    if "SUPPORTED" in judgment: return "SUPPORTED"
+    return "NOT_FOUND"
 
-def prompt_regenerate_baseline_rag(query: str, context: str, model_name: str, config: dict) -> str:
-    prompt = prompts.BASELINE_PROMPT_TEMPLATE_RAG_FIRST.format(context=context, query=query)
-    return generate(prompt, model_name, config)
+def prompt_generate_correct_fact(error_fact: str, model_name: str, config: dict, context: str) -> str:
+    prompt = CORRECT_FACT_TEMPLATE_RAG.format(fact_text=error_fact, context=context)
+    raw = generate(prompt, model_name, config)
+    return _extract_xml_tag(raw, "corrected_fact") or _clean_model_output(raw)
 
+def prompt_reconstruct_local_sentence(original_sentence: str, updated_facts: List[str],
+                                      query: str, model_name: str, config: dict) -> str:
+    # [핵심] XML 방식: 원문은 무시하고 팩트 리스트로 새로 짓기
+    fact_list_str = "\n".join(f"- {f}" for f in updated_facts)
+    prompt = RECONSTRUCT_LOCAL_SENTENCE_TEMPLATE.format(
+        original_sentence=original_sentence,
+        updated_facts=fact_list_str
+    )
+    raw = generate(prompt, model_name, config,
+                   generation_params_override={"temperature": 0.3, "max_new_tokens": 512})
+    # XML 태그 추출
+    return _extract_xml_tag(raw, "generated_sentence") or _clean_model_output(raw)
 
-# --- Main Logic ---
-def SERC_FactInSentence_Iterative(query: str, model_name: str, config: Dict[str, Any],
-                                    t_max: Optional[int] = None,
-                                    max_facts_per_group: Optional[int] = None
-                                    ) -> Dict[str, Any]:
+def prompt_global_polish(query: str, draft_text: str, model_name: str, config: dict) -> str:
+    prompt = GLOBAL_POLISH_TEMPLATE.format(query=query, draft_text=draft_text)
+    raw = generate(prompt, model_name, config,
+                   generation_params_override={"temperature": 0.5, "max_new_tokens": 1024})
+    return _extract_xml_tag(raw, "final_response") or _clean_model_output(raw)
 
-    T_MAX = t_max if t_max is not None else 3
-    MAX_FACTS_PER_GROUP = max_facts_per_group if max_facts_per_group is not None else 5
+# =============================================================================
+# Batch Processing Functions (Detection & Correction Split)
+# =============================================================================
+
+def _detect_syndromes_batch(sentence_batches: List[Dict], 
+                            model_name: str, 
+                            config: Dict, 
+                            retriever: RAGRetriever, 
+                            main_subject: str) -> Dict[str, Any]:
+    clean_facts = []
+    syndromes_buffer = [] 
+
+    logging.info(">>> [Step 1] Syndrome Detection Started (Collecting Errors...)")
     
-    logging.info(f"--- SERC Start --- Query: '{query[:50]}...'")
+    for batch in tqdm(sentence_batches, desc="Phase 1: Detecting"):
+        facts = batch["original_facts"]
+        if not facts: continue
 
-    try:
-        retriever = RAGRetriever(config=config)
-    except Exception as e:
-        logging.error(f"Retriever Init Error: {e}")
-        raise e
+        # 1. 검색 및 증거 확보
+        search_q = _prompt_generate_question_for_sentence_group(facts, model_name, config, main_subject)
+        context = retriever.retrieve(search_q)
+        evidence = _prompt_get_verification_answer(search_q, model_name, config, context)
 
-    history = {'query': query, 'model_name': model_name, 'cycles': []}
-
-    # 1. Baseline
-    logging.info("--- [Step 1] Baseline ---")
-    current_baseline = prompt_baseline(query, model_name, config)
-    history['initial_baseline'] = current_baseline
-    
-    # 1.5 Entity Firewall
-    logging.info("--- [Step 1.5] Firewall ---")
-    query_desc = prompt_extract_entity_desc(query, model_name, config, is_query=True)
-    model_desc = prompt_extract_entity_desc(current_baseline, model_name, config, is_query=False)
-    rag_context = retriever.retrieve(query)
-    rag_desc = prompt_extract_rag_desc(query, rag_context, model_name, config)
-    
-    logging.info(f"  Q: {query_desc}, M: {model_desc}, R: {rag_desc}")
-    main_subject_info = ""
-    is_query_ambiguous = (not query_desc) or "None" in query_desc
-    
-    if not is_query_ambiguous:
-        main_subject_info = query_desc
-    else:
-        if not model_desc:
-            main_subject_info = rag_desc if rag_desc else query
-        elif rag_desc and not prompt_judge_entity_consistency(model_desc, rag_desc, model_name, config):
-            logging.warning(f"  [Hard Reset] Model != RAG. Regenerating.")
-            current_baseline = prompt_regenerate_baseline_rag(query, rag_context, model_name, config)
-            history['regenerated_baseline'] = current_baseline
-            main_subject_info = rag_desc
-        else:
-            main_subject_info = model_desc
-
-    if not main_subject_info: main_subject_info = query
-    main_subject_name = main_subject_info.split('(')[0].strip()
-    logging.info(f"  >> LOCKED: '{main_subject_info}'")
-
-    final_verified_facts_map: Dict[str, str] = {}
-
-    # 2. Iterative Cycle
-    for t in range(1, T_MAX + 1):
-        cycle_log = {'cycle': t, 'steps': {}, 'baseline_before_cycle': current_baseline}
-        logging.info(f"\n--- [Cycle {t}] ---")
-
-        # 2a. Fact Extraction
-        sentences = ph.programmatic_split_into_sentences(current_baseline)
-        all_facts = {}
-        sentence_groups = []
-        fid_counter = 1
-        
-        for s in sentences:
-            if not s.strip(): continue
-            facts = prompt_extract_facts_from_sentence(s, model_name, config, main_subject_name)
-            valid_facts = {}
-            for f in facts:
-                if len(f) < 5: continue
-                fid = f"f{fid_counter}"
-                valid_facts[fid] = f
-                all_facts[fid] = f
-                final_verified_facts_map[fid] = f 
-                fid_counter += 1
-            if valid_facts:
-                sentence_groups.append({'sentence': s, 'facts': valid_facts})
-        
-        cycle_log['steps']['2_fact_extraction'] = {'sentence_groups': sentence_groups}
-        if not all_facts: break
-
-        # 2b. Verification
-        syndrome = {}
-        validation_details = []
-        
-        for group in sentence_groups:
-            sent_text = group['sentence']
-            facts_in_group = list(group['facts'].items())
+        for fact in facts:
+            verdict = prompt_validate_one_fact_against_evidence(fact, evidence, model_name, config)
             
-            for i in range(0, len(facts_in_group), MAX_FACTS_PER_GROUP):
-                chunk = facts_in_group[i:i+MAX_FACTS_PER_GROUP]
-                chunk_texts = [item[1] for item in chunk]
+            if verdict == "SUPPORTED":
+                clean_facts.append(fact)
+            elif verdict == "CONTRADICTED":
+                error_package = {
+                    "original_fact": fact,  
+                    "evidence": evidence,   
+                    "context": context,
+                    "origin_sentence": batch["sentence"]
+                }
+                syndromes_buffer.append(error_package)
+                logging.info(f"Error Detected: {fact[:30]}...")
+    
+    return {
+        "clean_facts": clean_facts,
+        "syndromes_buffer": syndromes_buffer
+    }
+
+def _correct_syndromes_batch(syndromes_buffer: List[Dict], 
+                             model_name: str, 
+                             config: Dict) -> Dict[str, str]:
+    """
+    [Phase 2] BP Correction with XML Parsing
+    XML 포맷을 사용하여 8B 모델의 출력 안정성을 확보합니다.
+    """
+    fact_correction_map = {}
+    
+    if not syndromes_buffer:
+        logging.info(">>> [Step 2] No errors to fix. Skipping correction.")
+        return {}
+
+    # 1. 문장별로 오류 그룹화
+    error_groups = defaultdict(list)
+    for item in syndromes_buffer:
+        error_groups[item["origin_sentence"]].append(item)
+
+    logging.info(f">>> [Step 2] BP Correction Started ({len(error_groups)} sentence groups)")
+
+    for sentence, items in tqdm(error_groups.items(), desc="Phase 2: Correcting with XML"):
+        context = items[0]["context"]
+        
+        # 입력 블록 생성
+        error_block = ""
+        for i, item in enumerate(items, 1):
+            error_block += f"{i}. {item['original_fact']}\n"
+        
+        # XML 프롬프트 호출
+        prompt = BP_CORRECTION_TEMPLATE.format(
+            context=context,
+            error_block=error_block
+        )
+        
+        raw_output = generate(prompt, model_name, config)
+        correction_blocks = re.findall(r"<correction>(.*?)</correction>", raw_output, re.DOTALL | re.IGNORECASE)
+        
+        for block in correction_blocks:
+            # 2. 블록 내부에서 original과 fixed 추출
+            orig_match = re.search(r"<original>(.*?)</original>", block, re.DOTALL | re.IGNORECASE)
+            fixed_match = re.search(r"<fixed>(.*?)</fixed>", block, re.DOTALL | re.IGNORECASE)
+            
+            if orig_match and fixed_match:
+                # 태그 안의 텍스트 추출 및 정리
+                clean_orig = orig_match.group(1).strip()
+                clean_corr = fixed_match.group(1).strip()
                 
-                search_query = _prompt_generate_question_for_sentence_group(
-                    chunk_texts, model_name, config, main_subject_info
-                )
-                context = retriever.retrieve(search_query)
-                verified_answer = _prompt_get_verification_answer(search_query, model_name, config, context)
-
-                for fid, ftext in chunk:
-                    judgment = prompt_validate_one_fact_against_evidence(ftext, verified_answer, model_name, config)
-                    val_entry = {'fact_id': fid, 'text': ftext, 'judgment': judgment}
-                    validation_details.append(val_entry)
-                    
-                    if judgment == "CONTRADICTED":
-                        logging.info(f"    [CONTRADICTED] {ftext}")
-                        syndrome[fid] = {'fact_text': ftext, 'original_sentence': sent_text, 'evidence_docs': context}
-                        if fid in final_verified_facts_map: del final_verified_facts_map[fid]
-                    elif judgment == "NOT_FOUND":
-                        if fid in final_verified_facts_map: del final_verified_facts_map[fid]
-
-        cycle_log['steps']['3_verification'] = validation_details
-        
-        # 2c. Correction
-        if not syndrome:
-            history['termination_reason'] = 'converged'
-            break
+                # "1. " 같은 번호나 하이픈이 딸려오면 제거
+                clean_orig = re.sub(r'^[\d\-\.\)\s]+', '', clean_orig)
+                
+                if clean_orig and clean_corr:
+                    fact_correction_map[clean_orig] = clean_corr
+                    logging.info(f"XML Fixed: {clean_orig[:15]}... -> {clean_corr[:15]}...")
             
-        logging.info(f"  Correcting {len(syndrome)} facts...")
-        new_baseline = current_baseline
-        correction_log = []
-        
-        for fid, err_data in syndrome.items():
-            if err_data['original_sentence'] not in new_baseline: continue
-            corrected_fact = prompt_generate_correct_fact(err_data['fact_text'], model_name, config, err_data['evidence_docs'])
-            if not corrected_fact: continue
-            
-            final_verified_facts_map[fid] = corrected_fact
-            rewritten = prompt_rewrite_sentence(err_data['original_sentence'], corrected_fact, model_name, config, main_subject_name)
-            
-            if rewritten and len(rewritten) > 10:
-                new_baseline = new_baseline.replace(err_data['original_sentence'], rewritten)
-                correction_log.append({'fid': fid, 'rewritten': rewritten})
-        
-        cycle_log['steps']['5_correction'] = correction_log
-        current_baseline = new_baseline
-        cycle_log['baseline_after_cycle'] = current_baseline
-        history['cycles'].append(cycle_log)
+    return fact_correction_map
 
-    # 3. Final Recomposition
-    logging.info("\n--- Final Recomposition ---")
-    if not final_verified_facts_map:
-        final_output = current_baseline
+# =============================================================================
+# Main SERC Implementation
+# =============================================================================
+
+def SERC(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, Any]:
+
+    logging.info(f"--- SERC Started --- Query: '{query[:60]}...'")
+
+    retriever = RAGRetriever(config=config)
+    history = {"query": query, "model_name": model_name, "steps": {}}
+
+    # Step 1: Baseline Generation
+    baseline = prompt_baseline(query, model_name, config)
+    is_refusal = (
+        len(baseline) < 50 or 
+        "sorry" in baseline.lower() or 
+        "cannot answer" in baseline.lower() or
+        "don't have information" in baseline.lower() or
+        "unable to provide" in baseline.lower() or
+        "as an ai" in baseline.lower() or
+        "not have access" in baseline.lower()
+    )
+
+    if is_refusal:
+        logging.warning(" Baseline refused to answer (Source Dropout). Attempting RAG-First Cold Start...")
+        rag_context = retriever.retrieve(query)
+        
+        if rag_context and len(rag_context) > 10:
+            baseline = prompt_regenerate_baseline_rag(query, rag_context, model_name, config)
+            history["regenerated_baseline"] = baseline
+            logging.info("RAG-First Cold Start Successful.")
+        else:
+            logging.error("RAG lookup also failed. Terminating process.")
+            return {
+                "query": query, 
+                "final_output": "I apologize, but I could not find verified information regarding your query.",
+                "status": "no_info"
+            }
+    
+    history["initial_baseline"] = baseline
+
+    # Step 1.5: Entity Firewall
+    query_entity = prompt_extract_entity_desc(query, model_name, config, is_query=True)
+    model_entity = prompt_extract_entity_desc(baseline, model_name, config, is_query=False)
+    rag_context = retriever.retrieve(query)
+    rag_entity = prompt_extract_rag_desc(query, rag_context, model_name, config)
+
+    main_subject = query_entity or rag_entity or query
+    if not query_entity or "None" in query_entity:
+        if rag_entity and model_entity and not prompt_judge_entity_consistency(model_entity, rag_entity, model_name, config):
+            logging.warning("Entity mismatch → Hard reset with RAG grounding")
+            baseline = prompt_regenerate_baseline_rag(query, rag_context, model_name, config)
+            history["regenerated_baseline"] = baseline
+        main_subject = rag_entity or model_entity or query
+
+    # Step 2: Fact Extraction per Sentence
+    sentences = ph.programmatic_split_into_sentences(baseline)
+    sentence_batches = []
+    for s in sentences:
+        if not s.strip(): continue
+        facts = prompt_extract_facts_from_sentence(s, model_name, config, main_subject)
+        facts = [f for f in facts if len(f) > 5]
+        if facts:
+            sentence_batches.append({"sentence": s, "original_facts": facts})
+
+    history["steps"]["sentence_batches"] = sentence_batches
+
+    # Step 3: Detection (Batch 1:1 Detection)
+    detection_result = _detect_syndromes_batch(
+        sentence_batches=sentence_batches,
+        model_name=model_name,
+        config=config,
+        retriever=retriever,
+        main_subject=main_subject
+    )
+    
+    clean_facts = detection_result["clean_facts"]
+    syndromes_buffer = detection_result["syndromes_buffer"]
+
+    # Step 4: Correction (Grouped Belief Propagation)
+    fact_correction_map = _correct_syndromes_batch(
+        syndromes_buffer=syndromes_buffer,
+        model_name=model_name,
+        config=config
+    )
+
+    history["steps"]["syndromes_detected"] = len(syndromes_buffer)
+    history["steps"]["fact_correction_map"] = fact_correction_map
+
+    # Step 5: Local Sentence Reconstruction
+    logging.info("--- Local Sentence Reconstruction ---")
+    local_sentences = []
+
+    for batch in sentence_batches:
+        orig_sent = batch["sentence"]
+        old_facts = batch["original_facts"]
+        
+        updated_facts_list = []
+        has_changes = False  # [최적화] 변경 사항 감지 플래그
+        
+        for f in old_facts:
+            # 1. BP로 수정된 팩트가 있는가?
+            if f in fact_correction_map:
+                updated_facts_list.append(fact_correction_map[f])
+                has_changes = True  # 변경 발생!
+            # 2. 없으면 원본 유지
+            else:
+                updated_facts_list.append(f)
+        
+        # [최적화 로직]
+        # 변경된 사실이 하나도 없다면? -> API 호출하지 말고 원문 그대로 사용
+        if not has_changes:
+            local_sentences.append(orig_sent)
+            logging.info(f"⏩ Skipped Reconstruction (No Errors): {orig_sent[:30]}...")
+            continue
+            
+        # 변경된 사실이 있다면? -> 새로 생성 (Generate from Scratch)
+        reconstructed = prompt_reconstruct_local_sentence(
+            original_sentence=orig_sent,
+            updated_facts=updated_facts_list,
+            query=query,
+            model_name=model_name,
+            config=config
+        )
+        final_sent = reconstructed.strip() if reconstructed and len(reconstructed) > 10 else orig_sent
+        local_sentences.append(final_sent)
+
+    history["steps"]["local_sentences"] = local_sentences
+
+    # Step 6: Global Polishing
+    logging.info("--- Global Polishing ---")
+    draft = "\n\n".join(local_sentences)
+
+    if len(draft.strip()) < 50:
+        logging.warning("Draft too short → fallback to baseline")
+        final_output = baseline
     else:
-        final_output = prompt_recompose(query, final_facts_map=final_verified_facts_map, model_name=model_name, config=config)
+        final_output = prompt_global_polish(query=query, draft_text=draft,
+                                            model_name=model_name, config=config).strip()
 
-    history['final_baseline'] = final_output
+    final_output = final_output or baseline
+    history["final_output"] = final_output
+    history["steps"]["global_draft"] = draft
+
+    logging.info("--- SERC Completed ---")
     return history
 
-def run_single_item_wrapper(item: Dict[str, Any], model_name: str, config: Dict[str, Any], t_max: int) -> Dict[str, Any]:
+# =============================================================================
+# Execution Wrapper & Main
+# =============================================================================
+
+def run_single_item(item: Dict[str, Any], model_name: str, config: Dict[str, Any]) -> Dict[str, Any]:
+    q = item.get("question") or item.get("query")
     try:
-        q = item.get('question', item.get('query'))
-        serc_history = SERC_FactInSentence_Iterative(query=q, model_name=model_name, config=config, t_max=t_max)
-        result = {'serc_result': serc_history, 'final_output': serc_history.get('final_baseline', ''), 'status': 'success'}
+        result = SERC(query=q, model_name=model_name, config=config)
+        return {**item, "method_result": {"final_output": result["final_output"], "history": result, "status": "success"}}
     except Exception as e:
-        logger.error(f"Error processing '{item.get('query')}': {e}", exc_info=True)
-        result = {"error": str(e), "status": "error"}
-    return {**item, "method_result": result}
+        logger.error(f"Error on '{q[:60]}...': {e}", exc_info=True)
+        return {**item, "method_result": {"error": str(e), "status": "error"}}
 
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="SERC: Hierarchical Belief Propagation Hallucination Correction")
     parser.add_argument("--config", type=str, default="config.yaml")
     parser.add_argument("--model", type=str, required=True)
     parser.add_argument("--dataset", type=str, required=True)
     parser.add_argument("--start", type=int, default=0)
     parser.add_argument("--end", type=int, default=None)
-    parser.add_argument("--output_dir", type=str, default="results/fact_in_sentence_iterative_rag")
-    parser.add_argument("--output_suffix", type=str, default="")
-    parser.add_argument("--t_max", type=int, default=3)
+    parser.add_argument("--save_interval", type=int, default=10)
+    parser.add_argument("--output_dir", type=str, default="results/serc")
     args = parser.parse_args()
-    
-    try:
-        config = load_config(args.config)
-    except Exception as e:
-        logger.error(f"Config Load Error: {e}")
-        return
 
-    dataset_path = os.path.join(PROJECT_ROOT, config['data_paths'][args.dataset])
-    try:
-        data = load_dataset(args.dataset, dataset_path)
-    except Exception as e:
-        logger.error(f"Dataset Load Error: {e}")
-        return
-
-    start = args.start
-    end = args.end if args.end is not None else len(data)
-    data_slice = data[start:end]
-    
-    logging.info(f"Processing {len(data_slice)} items.")
+    config = load_config(args.config)
+    data_path = os.path.join(PROJECT_ROOT, config['data_paths'][args.dataset])
+    data = load_dataset(args.dataset, data_path)
+    data = data[args.start: args.end]
 
     timestamp = get_timestamp()
-    results_dir = os.path.join(PROJECT_ROOT, args.output_dir, args.model.replace('/', '_'), args.dataset)
-    os.makedirs(results_dir, exist_ok=True)
-    output_path = os.path.join(results_dir, f"serc_revised_t{args.t_max}_{start}-{end}_{timestamp}.jsonl")
+    os.makedirs(os.path.join(PROJECT_ROOT, args.output_dir, args.model.replace('/', '_'), args.dataset), exist_ok=True)
+    output_path = os.path.join(PROJECT_ROOT, args.output_dir, args.model.replace('/', '_'), args.dataset,
+                               f"serc_{args.start}-{len(data)+args.start}_{timestamp}.jsonl")
 
     results = []
-    for item in tqdm(data_slice):
-        res = run_single_item_wrapper(item, args.model, config, args.t_max)
-        results.append(res)
-        
+    for i, item in enumerate(tqdm(data, desc="SERC Processing")):
+        results.append(run_single_item(item, args.model, config))
+        if (i + 1) % args.save_interval == 0:
+            save_jsonl(results, output_path)
+
     save_jsonl(results, output_path)
-    logging.info(f"Results saved to {output_path}")
+    logging.info(f"Done. Results → {output_path}")
 
 if __name__ == "__main__":
     main()

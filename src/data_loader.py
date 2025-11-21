@@ -3,6 +3,7 @@ import json
 import logging
 import csv
 from typing import List, Dict, Any
+import pandas as pd
 
 try:
     # 일반적인 실행 시 (예: experiments/run_experiment.py에서 호출)

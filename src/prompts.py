@@ -1,8 +1,4 @@
 from typing import List
-
-# --- 1. Initial Response Generation ---
-from typing import List
-
 # --- 1. Initial Response Generation ---
 BASELINE_PROMPT_TEMPLATE_PN = """[INSTRUCTION] Your task is to answer the user's question clearly and factually.
 
@@ -497,4 +493,84 @@ JUDGE_TRUTHFULQA_PROMPT_TEMPLATE = """[지시]
 {prediction}
 
 [판단]
+"""
+RECONSTRUCT_LOCAL_SENTENCE_TEMPLATE = """
+<instruction>
+You are an expert writer. Your task is to construct a **COMPLETELY NEW sentence** based **strictly** on the provided <verified_facts>.
+</instruction>
+
+<critical_rules>
+1. **IGNORE Original Content**: The <original_sentence_style_ref> contains HALLUCINATIONS (errors). Do NOT use its factual details (names, jobs, locations, dates).
+2. **Use ONLY Facts**: Construct the sentence using *only* the information found in <verified_facts>.
+3. **Style Transfer**: You may look at <original_sentence_style_ref> ONLY to match the tone or tense, but never for information.
+</critical_rules>
+
+<verified_facts>
+{updated_facts}
+</verified_facts>
+
+<original_sentence_style_ref>
+"{original_sentence}"
+</original_sentence_style_ref>
+
+<output_format>
+Write ONLY the new sentence inside <generated_sentence> tags.
+</output_format>
+
+<generated_sentence>
+"""
+
+GLOBAL_POLISH_TEMPLATE = """
+[INSTRUCTION]
+You are a final proofreader. The text below is a collection of fact-checked sentences. 
+Your task is to smooth out the transitions to make it read as a single coherent answer.
+
+[USER QUERY]
+{query}
+
+[DRAFT TEXT]
+{draft_text}
+
+[GUIDELINES]
+1. **Flow:** Use transition words (e.g., "However," "Additionally," "Consequently") to connect sentences naturally.
+2. **Conciseness:** Merge repetitive sentences if they convey the same information.
+3. **SAFETY (CRITICAL):** - DO NOT add any new information or facts. 
+   - DO NOT change the meaning of the provided sentences.
+   - ONLY improve the grammar and flow.
+
+[OUTPUT]
+Write the polished text immediately below.
+
+<final_response>
+""".strip()
+
+BP_CORRECTION_TEMPLATE = """
+[INSTRUCTION]
+The following facts extracted from a single sentence contain errors.
+Your task is to correct them based on the [CONTEXT].
+
+**CRITICAL RULES**:
+1. **Logic Propagation**: If you change a key detail in the first fact (e.g., "Executive" -> "Flight Attendant"), you **MUST update the subsequent facts** to match that change contextually.
+2. **XML Output**: Provide the output strictly in XML format as shown in the example.
+
+[CONTEXT]
+{context}
+
+[ERROR FACTS]
+{error_block}
+
+[OUTPUT FORMAT EXAMPLE]
+(Input Errors: "1. He was a pilot. 2. The pilot job was hard.")
+
+<correction>
+    <original>He was a pilot.</original>
+    <fixed>He was a doctor.</fixed>
+</correction>
+<correction>
+    <original>The pilot job was hard.</original>
+    <fixed>The doctor job was hard.</fixed>
+</correction>
+
+[YOUR RESPONSE]
+(Write only the XML corrections below)
 """

@@ -58,7 +58,7 @@ def _format_qa_evidence(qa_list: List[Dict[str, str]]) -> str:
 
 def _cove_get_rag_answer(question: str, context: str, model_name: str, config: dict) -> str:
     """CoVe 3단계: RAG로 검증 답변 생성"""
-    prompt = prompts.VERIFICATION_ANSWER_TEMPLATE_RAG.format(question=question, context=context)
+    prompt = prompts.VERIFICATION_ANSWER_TEMPLATE_RAG.format( context=context, query=question)
     answer_params = {"temperature": 0.01, "max_new_tokens": 100}
     raw_response = generate(prompt, model_name, config, generation_params_override=answer_params)
     

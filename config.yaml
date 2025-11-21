@@ -4,7 +4,7 @@
 # --- Default Generation Parameters ---
 default_generation_params:
   temperature: 0.01        # 기본 온도 값
-  top_p: 0.9              # 기본 top_p 값
+  top_p: 0.1              # 기본 top_p 값
   max_new_tokens: 128     # 생성될 최대 새 토큰 수
   repetition_penalty: 1.1 # 필요시 주석 해제
 
@@ -19,16 +19,13 @@ models:
       quantization: null        # 양자화 사용 안 함 (null 또는 제거)
       device_map: "auto"        # GPU 자동 할당
       dtype: "bfloat16"   # 데이터 타입 지정 (GPU 지원 및 메모리 상황 고려)
-    generation_params: # 이 모델 전용 생성 파라미터 (기본값 덮어쓰기)
-      temperature: 0.6
-      max_new_tokens: 1024
 
   - name: "Qwen/Qwen3-30B-A3B-Instruct-2507" # 30B Group
     provider: "local_hf"
     loading_params:
       quantization: "bitsandbytes_8bit" # 예시: 8비트 양자화 사용
       device_map: "auto"
-      # torch_dtype: "bfloat16" # 양자화 사용 시 dtype 자동 설정될 수 있음
+      torch_dtype: "bfloat16" # 양자화 사용 시 dtype 자동 설정될 수 있음
     # generation_params: null # null이면 default_generation_params 사용
 
   - name: "meta-llama/Llama-3.1-8B-Instruct" # 8B Group
