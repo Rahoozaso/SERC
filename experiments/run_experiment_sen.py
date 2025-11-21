@@ -4,7 +4,7 @@ import sys
 import logging
 import re
 from typing import Dict, Any, List, Optional
-from collections import defaultdict # [수정] 올바른 import 방식
+from collections import defaultdict
 from tqdm import tqdm
 
 # --- Project path setup ---
@@ -177,8 +177,6 @@ def _detect_syndromes_batch(sentence_batches: List[Dict],
     for batch in tqdm(sentence_batches, desc="Phase 1: Detecting"):
         facts = batch["original_facts"]
         if not facts: continue
-
-        # 1. 검색 및 증거 확보
         search_q = _prompt_generate_question_for_sentence_group(facts, model_name, config, main_subject)
         context = retriever.retrieve(search_q)
         evidence = _prompt_get_verification_answer(search_q, model_name, config, context)
@@ -193,7 +191,7 @@ def _detect_syndromes_batch(sentence_batches: List[Dict],
                     "original_fact": fact,  
                     "evidence": evidence,   
                     "context": context,
-                    "origin_sentence": batch["sentence"]
+                    "origin_sentence": batch["sentence"] 
                 }
                 syndromes_buffer.append(error_package)
                 logging.info(f"Error Detected: {fact[:30]}...")
@@ -211,8 +209,6 @@ def _correct_syndromes_batch(syndromes_buffer: List[Dict],
     if not syndromes_buffer:
         logging.info(">>> [Step 2] No errors to fix. Skipping correction.")
         return {}
-
-    # 1. 문장별로 오류 그룹화
     error_groups = defaultdict(list)
     for item in syndromes_buffer:
         error_groups[item["origin_sentence"]].append(item)
@@ -221,13 +217,9 @@ def _correct_syndromes_batch(syndromes_buffer: List[Dict],
 
     for sentence, items in tqdm(error_groups.items(), desc="Phase 2: Correcting with XML"):
         context = items[0]["context"]
-        
-        # 입력 블록 생성
         error_block = ""
         for i, item in enumerate(items, 1):
             error_block += f"{i}. {item['original_fact']}\n"
-        
-        # XML 프롬프트 호출
         prompt = BP_CORRECTION_TEMPLATE.format(
             context=context,
             error_block=error_block
@@ -276,7 +268,8 @@ def SERC(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, Any]:
         "not have access" in baseline.lower() or
         "i couldn't find" in baseline.lower()
     )
-    logging.info({is_refusal})
+    logging.info(f"Is Refusal: {is_refusal}")
+
     if is_refusal:
         logging.warning(" Baseline refused to answer (Source Dropout). Attempting RAG-First Cold Start...")
         rag_context = retriever.retrieve(query)
@@ -294,20 +287,29 @@ def SERC(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, Any]:
             }
     
     history["initial_baseline"] = baseline
-
-    # Step 1.5: Entity Firewall
+    logging.info("--- [Step 1.5] Entity Firewall check ---")
     query_entity = prompt_extract_entity_desc(query, model_name, config, is_query=True)
     model_entity = prompt_extract_entity_desc(baseline, model_name, config, is_query=False)
     rag_context = retriever.retrieve(query)
     rag_entity = prompt_extract_rag_desc(query, rag_context, model_name, config)
-
-    main_subject = query_entity or rag_entity or query
-    if not query_entity or "None" in query_entity:
-        if rag_entity and model_entity and not prompt_judge_entity_consistency(model_entity, rag_entity, model_name, config):
-            logging.warning("Entity mismatch → Hard reset with RAG grounding")
-            baseline = prompt_regenerate_baseline_rag(query, rag_context, model_name, config)
-            history["regenerated_baseline"] = baseline
-        main_subject = rag_entity or model_entity or query
+    logging.info(f" Model Entity: {model_entity} / RAG Entity: {rag_entity}")
+    is_consistent = False
+    if not model_entity or not rag_entity:
+        is_consistent = True
+    else:
+        is_consistent = prompt_judge_entity_consistency(model_entity, rag_entity, model_name, config)
+    if not is_consistent:
+        logging.warning(f" Entity Mismatch Detected! (Model: {model_entity} vs RAG: {rag_entity})")
+        logging.warning("Triggering Hard Reset: Regenerating Baseline with RAG Context...")
+        baseline = prompt_regenerate_baseline_rag(query, rag_context, model_name, config)
+        history["regenerated_baseline"] = baseline
+        history["firewall_triggered"] = True
+        main_subject = rag_entity
+    else:
+        logging.info("✅ Entity Check Passed.")
+        main_subject = model_entity if model_entity and len(model_entity) > len(rag_entity) else (rag_entity or query_entity or query)
+    if not main_subject:
+        main_subject = query
 
     # Step 2: Fact Extraction per Sentence
     sentences = ph.programmatic_split_into_sentences(baseline)
@@ -360,9 +362,10 @@ def SERC(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, Any]:
                 has_changes = True  # 변경 발생!
             else:
                 updated_facts_list.append(f)
+        
         if not has_changes:
             local_sentences.append(orig_sent)
-            logging.info(f" Skipped Reconstruction (No Errors): {orig_sent[:30]}...")
+            logging.info(f"⏩ Skipped Reconstruction (No Errors): {orig_sent[:30]}...")
             continue
             
         # 변경된 사실이 있다면? -> 새로 생성 (Generate from Scratch)

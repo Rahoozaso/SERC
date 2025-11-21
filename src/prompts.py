@@ -586,3 +586,46 @@ Your task is to correct them based on the [CONTEXT].
 
 [YOUR RESPONSE]
 """
+SELF_VALIDATE_TEMPLATE = """[INSTRUCTION]
+You are a strict fact-checker. Verify the following [CLAIM] based on your internal knowledge.
+
+[JUDGMENT RULES]
+1. **SUPPORTED**: The claim is factually accurate and true.
+2. **CONTRADICTED**: The claim is factually incorrect or contains hallucinations (e.g., wrong dates, wrong names, wrong events).
+
+[CLAIM]
+{fact_text}
+
+[RESPONSE FORMAT]
+<reasoning>
+Briefly explain why it is true or false.
+</reasoning>
+<judgment>SUPPORTED or CONTRADICTED</judgment>
+
+[RESPONSE]
+"""
+
+# 2. 컨텍스트 없이 BP 수정 (Self-Correction with BP)
+SELF_BP_CORRECTION_TEMPLATE = """[INSTRUCTION]
+The following facts extracted from a single sentence contain errors.
+Your task is to correct them based on your **accurate internal knowledge**.
+
+**CRITICAL RULES**:
+1. **Logic Propagation**: If you change a key detail in the first fact (e.g., "Executive" -> "Flight Attendant"), you **MUST update the subsequent facts** to match that change contextually.
+2. **XML Output**: Provide the output strictly in XML format.
+
+[ERROR FACTS]
+{error_block}
+
+[OUTPUT FORMAT EXAMPLE]
+<correction>
+    <original>He was a pilot.</original>
+    <fixed>He was a doctor.</fixed>
+</correction>
+<correction>
+    <original>The pilot job was hard.</original>
+    <fixed>The doctor job was hard.</fixed>
+</correction>
+
+[YOUR RESPONSE]
+"""

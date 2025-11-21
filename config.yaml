@@ -46,7 +46,7 @@ default_max_facts_per_group: 5 # 기본 그룹당 최대 사실 수 (튜닝 대�
 data_paths:
   longform_bio: "data/processed/factscore_bio_entities.txt"
   hallulens_precisewikiqa: "data/hallulens_precisewikiqa_prompts.jsonl"   # 예시 경로
-  truthfulqa: "data/TruthfulQA.csv" 
+  truthfulqa: "data/processed/TruthfulQA.csv" 
 
 # --- Result Paths ---
 results_base_dir: "results" # 모델/데이터셋별 결과 저장 기본 디렉토리
