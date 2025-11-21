@@ -273,9 +273,10 @@ def SERC(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, Any]:
         "don't have information" in baseline.lower() or
         "unable to provide" in baseline.lower() or
         "as an ai" in baseline.lower() or
-        "not have access" in baseline.lower()
+        "not have access" in baseline.lower() or
+        "i couldn't find" in baseline.lower()
     )
-
+    logging.info({is_refusal})
     if is_refusal:
         logging.warning(" Baseline refused to answer (Source Dropout). Attempting RAG-First Cold Start...")
         rag_context = retriever.retrieve(query)

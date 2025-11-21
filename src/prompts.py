@@ -7,20 +7,33 @@ BASELINE_PROMPT_TEMPLATE_PN = """[INSTRUCTION] Your task is to answer the user's
 [RESPONSE] """
 
 # --- 2. Entity Extraction (Code Hallucination 방지 강화) ---
-QUERY_ENTITY_EXTRACTOR_TEMPLATE = """[INSTRUCTION] Your task is to extract the subject's **Name** and its **Characteristic** from the [USER QUERY].
+QUERY_ENTITY_EXTRACTOR_TEMPLATE = """[INSTRUCTION] Your task is to extract a subject's **Name** and its **Characteristic** from the [USER QUERY].
 
-**CRITICAL RULES**:
-1. Respond ONLY in the format: Name (Characteristic)
-2. If no characteristic is found, use "None".
-3. **DO NOT WRITE CODE.** Do not write python functions. Just output the text.
+**CRITICAL RULES:**
+1.  Only extract characteristics **explicitly stated** in the query (e.g., "capital", "president").
+2.  **DO NOT infer characteristics** or use your general knowledge. If the query only gives a name (like "Albert Einstein"), the characteristic is "None".
+3.  Respond ONLY in the exact "Name (Characteristic)" format.
 
 [EXAMPLES]
-Q: Who is Joe Biden? -> Joe Biden (None)
-Q: Tell me about painter Grimshaw -> Grimshaw (Painter)
+[USER QUERY]
+What is the capital of France?
+[RESPONSE]
+Paris (Capital)
+
+[USER QUERY]
+Tell me about Albert Einstein
+[RESPONSE]
+Albert Einstein (None)
+
+[USER QUERY]
+Who is Joe Biden, the president?
+[RESPONSE]
+Joe Biden (president)
 
 [TASK]
-[USER QUERY]: {query}
-[RESPONSE]:
+[USER QUERY]
+{query}
+[RESPONSE]
 """
 
 BASELINE_ENTITY_EXTRACTOR_TEMPLATE = """[INSTRUCTION] Identify the main subject's **Proper Noun (Name)** and its **single Characteristic** (e.g., type, location, or occupation) from the [BASELINE TEXT].
@@ -572,5 +585,4 @@ Your task is to correct them based on the [CONTEXT].
 </correction>
 
 [YOUR RESPONSE]
-(Write only the XML corrections below)
 """
