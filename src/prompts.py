@@ -1,6 +1,6 @@
 from typing import List
 # --- 1. Initial Response Generation ---
-BASELINE_PROMPT_TEMPLATE_PN = """[INSTRUCTION] Your task is to answer the user's question clearly and factually.
+BASELINE_PROMPT_TEMPLATE_PN = """[INSTRUCTION] Your task is to answer the user's question clearly and factually.Write in a continuous paragraph.
 
 [QUESTION]
 {query}
@@ -509,22 +509,19 @@ JUDGE_TRUTHFULQA_PROMPT_TEMPLATE = """[지시]
 """
 RECONSTRUCT_LOCAL_SENTENCE_TEMPLATE = """
 <instruction>
-You are an expert writer. Your task is to construct a **COMPLETELY NEW sentence** based **strictly** on the provided <verified_facts>.
+You are an expert writer.
+Construct a natural, coherent sentence using **ONLY** the provided <verified_facts>.
 </instruction>
 
 <critical_rules>
-1. **IGNORE Original Content**: The <original_sentence_style_ref> contains HALLUCINATIONS (errors). Do NOT use its factual details (names, jobs, locations, dates).
-2. **Use ONLY Facts**: Construct the sentence using *only* the information found in <verified_facts>.
-3. **Style Transfer**: You may look at <original_sentence_style_ref> ONLY to match the tone or tense, but never for information.
+1. **Use Facts Only**: Do not add any information that is not in the facts.
+2. **Natural Flow**: Connect the facts smoothly.
+3. **No Hallucination**: If the facts say "Flight Attendant", write "Flight Attendant". Do not invent other titles like "Executive".
 </critical_rules>
 
 <verified_facts>
 {updated_facts}
 </verified_facts>
-
-<original_sentence_style_ref>
-"{original_sentence}"
-</original_sentence_style_ref>
 
 <output_format>
 Write ONLY the new sentence inside <generated_sentence> tags.
@@ -585,6 +582,7 @@ Your task is to correct them based on the [CONTEXT].
 </correction>
 
 [YOUR RESPONSE]
+(Write only the XML corrections below)
 """
 SELF_VALIDATE_TEMPLATE = """[INSTRUCTION]
 You are a strict fact-checker. Verify the following [CLAIM] based on your internal knowledge.

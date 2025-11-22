@@ -26,8 +26,8 @@ def _get_huggingface_token(config: Dict[str, Any]) -> Optional[str]:
 def generate(prompt: str, model_name: str, config: Dict[str, Any],
              generation_params_override: Optional[Dict[str, Any]] = None) -> str:
     
-    # print(f"\n--- 모델 호출 시작: {model_name} ---")
-    # print(f"프롬프트 (시작):\n{prompt[:200]}...\n") 
+    print(f"\n--- 모델 호출 시작: {model_name} ---")
+    print(f"프롬프트 (시작):\n{prompt[:200]}...\n") 
 
     # 모델 설정 찾기
     model_config = next((m for m in config.get('models', []) if m.get('name') == model_name), None)

@@ -109,8 +109,17 @@ def prompt_regenerate_baseline_rag(query: str, context: str, model_name: str, co
 def prompt_extract_facts_from_sentence(sentence: str, model_name: str, config: dict, main_subject: str) -> List[str]:
     prompt = EXTRACT_FACTS_TEMPLATE_PN.format(sentence=sentence, main_subject=main_subject)
     raw = generate(prompt, model_name, config)
+
+    # [수정] 불필요한 종료 태그 이후 내용 제거
+    # 모델이 가끔 [/INSTRUCTION] 또는 [/INSTURCTION] 같은 태그를 뱉고 그 뒤에 헛소리를 하는 경우 방지
+    stop_markers = ["[/INSTRUCTION]", "[/INSTURCTION]", "[/INST]"]
+    for marker in stop_markers:
+        if marker in raw:
+            raw = raw.split(marker)[0]
+    # XML 파싱
     facts = re.findall(r"<fact>(.*?)</fact>", raw, re.DOTALL | re.IGNORECASE)
     facts = [f.strip() for f in facts if f.strip()]
+    # XML 실패 시 백업 파싱 (하이픈 - )
     if not facts:
         facts = [line[2:].strip() for line in raw.split('\n') if line.strip().startswith('- ')]
     return facts
@@ -129,7 +138,7 @@ def _prompt_get_verification_answer(question: str, model_name: str, config: dict
 def prompt_validate_one_fact_against_evidence(fact: str, evidence: str, model_name: str, config: dict) -> str:
     prompt = VALIDATE_EVIDENCE_TEMPLATE.format(fact_text=fact, evidence_text=evidence)
     raw = generate(prompt, model_name, config,
-                   generation_params_override={"temperature": 0.1, "max_new_tokens": 512})
+                   generation_params_override={"temperature": 0.1, "max_new_tokens": 1024})
     judgment = _extract_xml_tag(raw, "judgment").upper()
     if "CONTRADICTED" in judgment: return "CONTRADICTED"
     if "SUPPORTED" in judgment: return "SUPPORTED"
@@ -196,6 +205,8 @@ def _detect_syndromes_batch(sentence_batches: List[Dict],
                 }
                 syndromes_buffer.append(error_package)
                 logging.info(f"Error Detected: {fact[:30]}...")
+                logging.warning(f"   📌 Fact: {fact}")
+                logging.warning(f"   🔗 Origin: {batch['sentence'][:50]}...")
     
     return {
         "clean_facts": clean_facts,
@@ -226,7 +237,7 @@ def _correct_syndromes_batch(syndromes_buffer: List[Dict],
             error_block=error_block
         )
         
-        raw_output = generate(prompt, model_name, config)
+        raw_output = generate(prompt, model_name, config,generation_params_override={"max_new_tokens": 512, "temperature": 0.1 })
         correction_blocks = re.findall(r"<correction>(.*?)</correction>", raw_output, re.DOTALL | re.IGNORECASE)
         
         for block in correction_blocks:
