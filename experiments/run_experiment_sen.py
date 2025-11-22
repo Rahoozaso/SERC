@@ -419,7 +419,7 @@ def main():
     parser.add_argument("--dataset", type=str, required=True)
     parser.add_argument("--start", type=int, default=0)
     parser.add_argument("--end", type=int, default=None)
-    parser.add_argument("--save_interval", type=int, default=10)
+    parser.add_argument("--save_interval", type=int, default=5)
     parser.add_argument("--output_dir", type=str, default="results/serc")
     args = parser.parse_args()
 
