@@ -6,7 +6,6 @@ import re
 from typing import Dict, Any, List, Optional
 from collections import defaultdict
 from tqdm import tqdm
-from src.utils import token_tracker
 
 # --- Project path setup ---
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -14,6 +13,7 @@ sys.path.append(PROJECT_ROOT)
 sys.path.append(os.path.join(PROJECT_ROOT, "src"))
 
 try:
+    from src.utils import token_tracker
     from src import programmatic_helpers as ph
     from src.utils import load_config, save_jsonl, get_timestamp
     from src.data_loader import load_dataset
