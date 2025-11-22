@@ -88,6 +88,29 @@ EXTRACT_FACTS_TEMPLATE_PN = """[INSTRUCTION] Break down the [SENTENCE] into **At
 4. **No Merging:** Do NOT merge multiple independent events into one fact.
 5. **Output Format:** Output facts inside <facts> tags.
 
+## EXAMPLES
+
+[SENTENCE]
+Albert Einstein, who was a theoretical physicist, developed the theory of relativity and won the Nobel Prize.
+(Subject: Albert Einstein)
+
+[RESPONSE]
+<facts>
+  <fact>Albert Einstein was a theoretical physicist</fact>
+  <fact>Albert Einstein developed the theory of relativity</fact>
+  <fact>Albert Einstein won the Nobel Prize</fact>
+</facts>
+
+[SENTENCE]
+It was released in 2007 by Apple and revolutionized the smartphone industry.
+(Subject: The iPhone)
+
+[RESPONSE]
+<facts>
+  <fact>The iPhone was released in 2007 by Apple</fact>
+  <fact>The iPhone revolutionized the smartphone industry</fact>
+</facts>
+
 [SENTENCE]
 {sentence}
 
@@ -117,13 +140,19 @@ The final output must be suitable for a search engine query.
         prompt += f"- {f}\n"
     
     prompt += """
-## EXAMPLE
+## EXAMPLES
 [FACTS TO COVER]
 - The movie was directed by Christopher Nolan.
 - The movie was released in July 2010.
 - Leonardo DiCaprio starred in the movie.
 [RESPONSE]
 <query>Who directed and starred in the movie released in July 2010?</query>
+
+[FACTS TO COVER]
+- Elon Musk was born on June 28, 1971.
+- He was born in Pretoria, South Africa.
+[RESPONSE]
+<query>When and where was Elon Musk born?</query>
 
 [RESPONSE FORMAT]
 <query>Single comprehensive verification question/query</query>
