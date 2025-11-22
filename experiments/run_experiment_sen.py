@@ -110,18 +110,42 @@ def prompt_extract_facts_from_sentence(sentence: str, model_name: str, config: d
     prompt = EXTRACT_FACTS_TEMPLATE_PN.format(sentence=sentence, main_subject=main_subject)
     raw = generate(prompt, model_name, config)
 
-    # [수정] 불필요한 종료 태그 이후 내용 제거
-    # 모델이 가끔 [/INSTRUCTION] 또는 [/INSTURCTION] 같은 태그를 뱉고 그 뒤에 헛소리를 하는 경우 방지
-    stop_markers = ["[/INSTRUCTION]", "[/INSTURCTION]", "[/INST]"]
+    # 1. 불필요한 종료 태그 이후 내용 제거 (Prompt Leakage 방지)
+    stop_markers = ["[/INSTRUCTION]", "[/INSTURCTION]", "[/INST]", "[RESPONSE]"]
     for marker in stop_markers:
         if marker in raw:
             raw = raw.split(marker)[0]
-    # XML 파싱
-    facts = re.findall(r"<fact>(.*?)</fact>", raw, re.DOTALL | re.IGNORECASE)
-    facts = [f.strip() for f in facts if f.strip()]
-    # XML 실패 시 백업 파싱 (하이픈 - )
+
+    # 2. <facts> 블록 범위 확인 및 로깅
+    facts_block_match = re.search(r"<facts>(.*?)</facts>", raw, re.DOTALL | re.IGNORECASE)
+    
+    if facts_block_match:
+        # 1순위: <facts> 블록 안에서 검색
+        content_to_search = facts_block_match.group(1)
+        logging.info("  [Extract Method] PRIMARY: Targeting content inside <facts> block.")
+    else:
+        # 2순위: 전체 텍스트에서 검색 (Fallback)
+        content_to_search = raw
+        logging.info("  [Extract Method] FALLBACK: <facts> block not found. Searching raw output.")
+
+    # 3. XML 태그 추출
+    facts = re.findall(r"<fact>(.*?)</fact>", content_to_search, re.DOTALL | re.IGNORECASE)
+    
+    # 4. XML 실패 시 백업 파싱 (하이픈 - )
     if not facts:
-        facts = [line[2:].strip() for line in raw.split('\n') if line.strip().startswith('- ')]
+        facts = [line.strip().lstrip("- ").strip() for line in content_to_search.split('\n') if line.strip().startswith('- ')]
+        if facts:
+            logging.warning("  [Extract Method] SUCCESS: Used hyphen fallback (XML failed).")
+    
+    # 5. 공백 제거 및 정리
+    if facts:
+        facts = [f.strip() for f in facts if f.strip()]
+
+    # 6. [최종 방어] 팩트가 추출되지 않으면, 원본 문장 전체를 하나의 팩트로 반환
+    if not facts:
+        logging.warning(f"  [CRITICAL FAIL] Fact extraction failed completely. Using sentence as fact.")
+        return [sentence] 
+
     return facts
 
 def _prompt_generate_question_for_sentence_group(facts: List[str], model_name: str, config: dict, main_subject: str) -> str:
@@ -276,7 +300,6 @@ def SERC(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, Any]:
         "cannot answer" in baseline.lower() or
         "don't have information" in baseline.lower() or
         "unable to provide" in baseline.lower() or
-        "as an ai" in baseline.lower() or
         "not have access" in baseline.lower() or
         "i couldn't find" in baseline.lower()
     )
