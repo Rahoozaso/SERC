@@ -6,6 +6,7 @@ import re
 from typing import Dict, Any, List, Optional
 from collections import defaultdict
 from tqdm import tqdm
+from src.utils import token_tracker
 
 # --- Project path setup ---
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -306,7 +307,7 @@ def SERC(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, Any]:
         history["firewall_triggered"] = True
         main_subject = rag_entity
     else:
-        logging.info("✅ Entity Check Passed.")
+        logging.info("Entity Check Passed.")
         main_subject = model_entity if model_entity and len(model_entity) > len(rag_entity) else (rag_entity or query_entity or query)
     if not main_subject:
         main_subject = query
@@ -365,7 +366,7 @@ def SERC(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, Any]:
         
         if not has_changes:
             local_sentences.append(orig_sent)
-            logging.info(f"⏩ Skipped Reconstruction (No Errors): {orig_sent[:30]}...")
+            logging.info(f"Skipped Reconstruction (No Errors): {orig_sent[:30]}...")
             continue
             
         # 변경된 사실이 있다면? -> 새로 생성 (Generate from Scratch)
@@ -405,12 +406,30 @@ def SERC(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, Any]:
 
 def run_single_item(item: Dict[str, Any], model_name: str, config: Dict[str, Any]) -> Dict[str, Any]:
     q = item.get("question") or item.get("query")
+    token_tracker.reset()
     try:
         result = SERC(query=q, model_name=model_name, config=config)
-        return {**item, "method_result": {"final_output": result["final_output"], "history": result, "status": "success"}}
+        usage = token_tracker.get_usage()
+        
+        return {
+            **item, 
+            "method_result": {
+                "final_output": result["final_output"], 
+                "history": result, 
+                "status": "success",
+                "token_usage": usage
+            }
+        }
     except Exception as e:
         logger.error(f"Error on '{q[:60]}...': {e}", exc_info=True)
-        return {**item, "method_result": {"error": str(e), "status": "error"}}
+        return {
+            **item, 
+            "method_result": {
+                "error": str(e), 
+                "status": "error",
+                "token_usage": token_tracker.get_usage() # 에러 나기 전까지 쓴 거라도 기록
+            }
+        }
 
 def main():
     parser = argparse.ArgumentParser(description="SERC: Hierarchical Belief Propagation Hallucination Correction")

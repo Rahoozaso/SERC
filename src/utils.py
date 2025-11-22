@@ -124,3 +124,42 @@ if __name__ == '__main__':
     # --- Test Timestamp ---
     print("\n--- Testing Timestamp ---")
     print("Current timestamp:", get_timestamp())
+    
+class TokenUsageTracker:
+    """
+    전역적으로 토큰 사용량을 추적하는 싱글톤 클래스입니다.
+    """
+    _instance = None
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(TokenUsageTracker, cls).__new__(cls)
+            cls._instance.total_tokens = 0
+            cls._instance.input_tokens = 0
+            cls._instance.output_tokens = 0
+        return cls._instance
+
+    def reset(self):
+        self.total_tokens = 0
+        self.input_tokens = 0
+        self.output_tokens = 0
+
+    def add(self, input_text: str, output_text: str):
+        # Llama-3 토크나이저가 없어도 대략적인 근사치(1 token ≈ 4 chars)로 계산
+        # (정확한 계산을 원하면 tokenizer.encode(text) len을 써야 하지만, 비교 실험용으로는 근사치도 허용됨)
+        in_cnt = len(input_text) / 4
+        out_cnt = len(output_text) / 4
+        
+        self.input_tokens += int(in_cnt)
+        self.output_tokens += int(out_cnt)
+        self.total_tokens += int(in_cnt + out_cnt)
+
+    def get_usage(self):
+        return {
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "total_tokens": self.total_tokens
+        }
+
+# 전역 객체 생성
+token_tracker = TokenUsageTracker()

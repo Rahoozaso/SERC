@@ -16,13 +16,10 @@ sys.path.append(os.path.join(PROJECT_ROOT, "src"))
 try:
     from src.model_wrappers import generate
     from src import prompts
-    from src.utils import load_config, save_jsonl, get_timestamp
+    from src.utils import load_config, save_jsonl, get_timestamp, token_tracker
     from src.data_loader import load_dataset
-
-    # RAG 모듈 및 RAG용 헬퍼 임포트
     from src.rag_retriever import RAGRetriever
     from src.prompts import VERIFICATION_ANSWER_TEMPLATE_RAG
-    # SERC의 Baseline 생성 함수 재사용
     from src.main_serc import prompt_baseline 
 
 except ImportError:
@@ -183,6 +180,7 @@ def run_cove_rag(query: str, model_name: str, config: Dict[str, Any]) -> Dict[st
 
 # --- 단일 항목 처리 래퍼 ---
 def run_single_item_wrapper(item: Dict[str, Any], model_name: str, config: Dict[str, Any]) -> Dict[str, Any]:
+    token_tracker.reset()
     try:
         query = item.get('question', item.get('query'))
         cove_history = run_cove_rag(
@@ -190,11 +188,20 @@ def run_single_item_wrapper(item: Dict[str, Any], model_name: str, config: Dict[
             model_name=model_name,
             config=config
         )
-        method_result = {'cove_result': cove_history, 'final_output': cove_history.get('final_output', ''), 'status': 'success'}
+        usage = token_tracker.get_usage()
+        method_result = {
+            'cove_result': cove_history, 
+            'final_output': cove_history.get('final_output', ''), 
+            'status': 'success',
+            'token_usage': usage
+        }
     except Exception as e:
         logger.error(f"'{query}' 처리 중 오류 발생 (CoVe-RAG): {e}", exc_info=False)
-        method_result = {"error": f"Exception during processing: {e}", "status": "error"}
-
+        method_result = {
+            "error": f"Exception during processing: {e}", 
+            "status": "error",
+            "token_usage": token_tracker.get_usage()
+        }
     output_item = {
         **item, 
         "method_result": method_result,
@@ -212,7 +219,7 @@ def main():
     parser.add_argument("--dataset", type=str, required=True, help="Dataset name (key in config data_paths).")
     parser.add_argument("--start", type=int, default=0, help="Start index of the dataset.")
     parser.add_argument("--end", type=int, default=None, help="End index of the dataset.")
-    parser.add_argument("--save_interval", type=int, default=5, help="Save results every N items.")
+    parser.add_argument("--save_interval", type=int, default=10, help="Save results every N items.")
     parser.add_argument("--output_dir", type=str, default="results/cove_rag", help="Dir to save results.")
     parser.add_argument("--output_suffix", type=str, default="", help="Optional output filename suffix.")
 
@@ -242,16 +249,12 @@ def main():
     except Exception as e:
         logger.error(f"데이터셋 로딩 중 오류 발생 ({dataset_path}). 종료합니다.", exc_info=True)
         return
-    
-    # [수정] 데이터 슬라이싱 (Start ~ End)
     if not data:
         logger.error("로드된 데이터가 없습니다.")
         return
 
     total_data_len = len(data)
-    # end가 없으면 끝까지
     end_idx = args.end if args.end is not None else total_data_len
-    # 범위 제한 (IndexError 방지)
     if args.start < 0: args.start = 0
     if end_idx > total_data_len: end_idx = total_data_len
     
@@ -261,9 +264,8 @@ def main():
     timestamp = get_timestamp()
     results_base_dir_abs = os.path.join(PROJECT_ROOT, args.output_dir)
     results_dir = os.path.join(results_base_dir_abs, args.model.replace('/', '_'), args.dataset)
-    os.makedirs(results_dir, exist_ok=True) # 폴더 생성 추가
+    os.makedirs(results_dir, exist_ok=True) 
     
-    # [수정] 파일명에 start-end 포함
     suffix_str = f"_{args.output_suffix}" if args.output_suffix else ""
     output_filename = f"cove_rag_{args.start}-{end_idx}{suffix_str}_{timestamp}.jsonl"
     output_path = os.path.join(results_dir, output_filename)
@@ -274,11 +276,9 @@ def main():
         result_item = run_single_item_wrapper(item=item, model_name=args.model, config=config)
         results.append(result_item)
         
-        # 중간 저장
         if (i + 1) % args.save_interval == 0:
             save_jsonl(results, output_path)
     
-    # 최종 저장
     save_jsonl(results, output_path)
     logging.info(f"\n--- CoVe [RAG] 실험 완료. 총 {len(results)}개의 결과가 {output_path}에 저장되었습니다. ---")
 

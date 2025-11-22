@@ -5,6 +5,7 @@ import random
 from typing import Dict, Any, Optional
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+from src.utils import token_tracker
 
 load_dotenv()
 _loaded_models = {}
@@ -24,8 +25,9 @@ def _get_huggingface_token(config: Dict[str, Any]) -> Optional[str]:
 # --- 메인 생성 함수 ---
 def generate(prompt: str, model_name: str, config: Dict[str, Any],
              generation_params_override: Optional[Dict[str, Any]] = None) -> str:
-    print(f"\n--- 모델 호출 시작: {model_name} ---")
-    print(f"프롬프트 (시작):\n{prompt[:200]}...\n") # 프롬프트 시작 부분 로그
+    
+    # print(f"\n--- 모델 호출 시작: {model_name} ---")
+    # print(f"프롬프트 (시작):\n{prompt[:200]}...\n") 
 
     # 모델 설정 찾기
     model_config = next((m for m in config.get('models', []) if m.get('name') == model_name), None)
@@ -34,12 +36,12 @@ def generate(prompt: str, model_name: str, config: Dict[str, Any],
         return f"오류: 모델 '{model_name}' 설정을 찾을 수 없습니다."
 
     provider = model_config.get('provider')
-    response = f"오류: Provider '{provider}'이(가) 구현되지 않았거나 실패했습니다." # 기본 오류 메시지
+    response = f"오류: Provider '{provider}'이(가) 구현되지 않았거나 실패했습니다." 
 
     try:
         # --- 더미 Provider ---
         if provider == "dummy":
-            time.sleep(0.1) # 지연 시간 흉내
+            time.sleep(0.1) 
             if "[검증 질문]" in prompt:
                 response = "더미: 이 사실은 출처에 따라 올바른가요?"
             elif "[사실적 답변]" in prompt:
@@ -52,12 +54,20 @@ def generate(prompt: str, model_name: str, config: Dict[str, Any],
                 response = "더미: 이것은 수정을 반영하여 재작성된 문장입니다."
             else:
                 response = f"더미 응답: {prompt[:50]}..."
+            
+            # [추가] 더미 토큰 계산 (근사치: 4글자 = 1토큰)
+            in_tokens = len(prompt) // 4
+            out_tokens = len(response) // 4
+            token_tracker.input_tokens += in_tokens
+            token_tracker.output_tokens += out_tokens
+            token_tracker.total_tokens += (in_tokens + out_tokens)
+            
             print(f"더미 응답: {response}")
 
         # --- 로컬 Hugging Face Provider ---
         elif provider == "local_hf":
             model_id = model_config['name']
-            cache_key = model_id # 모델 ID를 캐시 키로 사용
+            cache_key = model_id 
 
             # 캐시에 모델과 토크나이저가 없으면 로드
             if cache_key not in _loaded_models:
@@ -66,29 +76,24 @@ def generate(prompt: str, model_name: str, config: Dict[str, Any],
                 quantization_config = None
                 quant_type = loading_params.get('quantization')
 
-                # 양자화 설정
                 if quant_type == "bitsandbytes_4bit":
                     quantization_config = BitsAndBytesConfig(
                         load_in_4bit=True,
-                        bnb_4bit_compute_dtype=torch.bfloat16 # 또는 float16
+                        bnb_4bit_compute_dtype=torch.bfloat16 
                     )
                     print("4비트 양자화(BitsAndBytes) 사용 중.")
                 elif quant_type == "bitsandbytes_8bit":
                      quantization_config = BitsAndBytesConfig(load_in_8bit=True)
                      print("8비트 양자화(BitsAndBytes) 사용 중.")
-                # 다른 양자화 방식(AWQ, GPTQ 등) 지원 추가 가능
 
-                # 인증 토큰 처리
                 auth_token = None
                 if model_config.get('requires_auth_token'):
                     auth_token = _get_huggingface_token(config)
                     if not auth_token:
-                        # 토큰이 꼭 필요한 모델이면 여기서 에러 발생
                         raise ValueError(f"모델 {model_id}은(는) 인증 토큰이 필요하지만 제공되지 않았습니다.")
                     else:
                          print("Hugging Face 인증 토큰 사용 중.")
 
-                # 데이터 타입(dtype) 설정
                 dtype_str = loading_params.get('torch_dtype', 'auto')
                 try:
                     torch_dtype = getattr(torch, dtype_str) if hasattr(torch, dtype_str) else 'auto'
@@ -97,22 +102,18 @@ def generate(prompt: str, model_name: str, config: Dict[str, Any],
                     print(f"경고: 잘못된 torch_dtype '{dtype_str}'. 'auto'로 설정합니다.")
                     torch_dtype = 'auto'
 
-
-                # 모델 로드
                 model = AutoModelForCausalLM.from_pretrained(
                     model_id,
                     quantization_config=quantization_config,
                     device_map=loading_params.get('device_map', 'auto'),
                     torch_dtype=torch_dtype,
                     token=auth_token,
-                    trust_remote_code=loading_params.get('trust_remote_code', False), # 필요시 True로 설정
+                    trust_remote_code=loading_params.get('trust_remote_code', False),
                 )
-                # 토크나이저 로드
                 tokenizer = AutoTokenizer.from_pretrained(model_id, token=auth_token)
                 _loaded_models[cache_key] = {"model": model, "tokenizer": tokenizer}
                 print(f"모델 {model_id} 로드 완료. Device: {model.device}")
             else:
-                # print(f"캐시된 모델 사용 중: {model_id}")
                 pass
 
             model_data = _loaded_models[cache_key]
@@ -129,20 +130,31 @@ def generate(prompt: str, model_name: str, config: Dict[str, Any],
 
             # --- 생성 ---
             inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
-            # GenerationConfig 객체 또는 개별 인자 사용 가능
+            
             outputs = model.generate(
                 **inputs,
-                temperature=gen_params.get('temperature', 1.0), # 기본값 1.0 추가
-                top_p=gen_params.get('top_p', 1.0),         # 기본값 1.0 추가
-                max_new_tokens=gen_params.get('max_new_tokens', 512), # 기본값 추가
+                temperature=gen_params.get('temperature', 1.0),
+                top_p=gen_params.get('top_p', 1.0),
+                max_new_tokens=gen_params.get('max_new_tokens', 512),
                 repetition_penalty=gen_params.get('repetition_penalty'),
-                do_sample=(gen_params.get('temperature', 1.0) > 0.0 and gen_params.get('top_p', 1.0) < 1.0), # 온도가 0이 아니고 top_p가 1 미만일 때만 샘플링
-                pad_token_id=tokenizer.eos_token_id or tokenizer.pad_token_id # EOS 또는 PAD 토큰 사용
+                do_sample=(gen_params.get('temperature', 1.0) > 0.0 and gen_params.get('top_p', 1.0) < 1.0),
+                pad_token_id=tokenizer.eos_token_id or tokenizer.pad_token_id
             )
-            # 입력 부분을 제외하고 새로 생성된 텍스트만 디코딩
+            
             response_ids = outputs[0][inputs['input_ids'].shape[1]:]
             response = tokenizer.decode(response_ids, skip_special_tokens=True)
-            print(f"로컬 HF 응답: {response}") # 너무 길면 잘라서 출력
+            
+            # [핵심 수정] 정확한 토큰 수 계산 및 기록
+            input_tokens_count = inputs['input_ids'].shape[1]
+            output_tokens_count = len(response_ids)
+            
+            # 전역 트래커 업데이트
+            token_tracker.input_tokens += input_tokens_count
+            token_tracker.output_tokens += output_tokens_count
+            token_tracker.total_tokens += (input_tokens_count + output_tokens_count)
+
+            print(f"로컬 HF 응답: {response}")
+            # print(f"📊 토큰 사용량: Input({input_tokens_count}) + Output({output_tokens_count}) = {input_tokens_count + output_tokens_count}")
 
         else:
             print(f"*** 오류: Provider '{provider}'은(는) 지원되지 않습니다. ***")
@@ -151,7 +163,7 @@ def generate(prompt: str, model_name: str, config: Dict[str, Any],
     except Exception as e:
         print(f"*** {model_name} ({provider}) 모델 호출 중 오류 발생: {e} ***")
         import traceback
-        traceback.print_exc() # 디버깅을 위한 전체 트레이스백 출력
+        traceback.print_exc()
         response = f"오류: 생성 중 예외 발생 - {type(e).__name__}"
 
     return response.strip()
