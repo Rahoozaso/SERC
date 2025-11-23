@@ -154,7 +154,7 @@ def generate(prompt: str, model_name: str, config: Dict[str, Any],
             token_tracker.total_tokens += (input_tokens_count + output_tokens_count)
 
             print(f"로컬 HF 응답: {response}")
-            # print(f"📊 토큰 사용량: Input({input_tokens_count}) + Output({output_tokens_count}) = {input_tokens_count + output_tokens_count}")
+            print(f"📊 토큰 사용량: Input({input_tokens_count}) + Output({output_tokens_count}) = {input_tokens_count + output_tokens_count}")
 
         else:
             print(f"*** 오류: Provider '{provider}'은(는) 지원되지 않습니다. ***")

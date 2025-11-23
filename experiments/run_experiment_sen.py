@@ -6,6 +6,10 @@ import re
 from typing import Dict, Any, List, Optional
 from collections import defaultdict
 from tqdm import tqdm
+import random
+import numpy as np
+import torch
+import gc
 
 # --- Project path setup ---
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -444,10 +448,17 @@ def SERC(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, Any]:
 # =============================================================================
 # Execution Wrapper & Main
 # =============================================================================
+def set_seed(seed=42):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 def run_single_item(item: Dict[str, Any], model_name: str, config: Dict[str, Any]) -> Dict[str, Any]:
     q = item.get("question") or item.get("query")
     token_tracker.reset()
+    set_seed(42)
     try:
         result = SERC(query=q, model_name=model_name, config=config)
         usage = token_tracker.get_usage()
@@ -461,6 +472,7 @@ def run_single_item(item: Dict[str, Any], model_name: str, config: Dict[str, Any
                 "token_usage": usage
             }
         }
+    
     except Exception as e:
         logger.error(f"Error on '{q[:60]}...': {e}", exc_info=True)
         return {
@@ -471,6 +483,10 @@ def run_single_item(item: Dict[str, Any], model_name: str, config: Dict[str, Any
                 "token_usage": token_tracker.get_usage() # 에러 나기 전까지 쓴 거라도 기록
             }
         }
+    finally:
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
 def main():
     parser = argparse.ArgumentParser(description="SERC: Hierarchical Belief Propagation Hallucination Correction")

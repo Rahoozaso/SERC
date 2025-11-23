@@ -125,14 +125,42 @@ It was released in 2007 by Apple and revolutionized the smartphone industry.
 
 # --- 4. Question Generation (Simplified) ---
 def generate_sentence_group_question_prompt(fact_texts_list: List[str]) -> str:
-    prompt = """[INSTRUCTION] You are an expert fact-checking researcher.
-Your goal is to generate **ONE single, comprehensive verification question** that, if answered truthfully, would confirm ALL the provided [FACTS].
-The final output must be suitable for a search engine query.
+    prompt = """[INSTRUCTION]
+You are an expert Google Search Query Generator.
+Your goal is to generate **ONE single, comprehensive search query** that can verify **ALL** the provided [FACTS] simultaneously.
 
-## CRITICAL RULES
-1. **Output Format:** The question must be concise and contain all necessary key details (dates, places, roles) from the facts.
-2. **Subject Focus:** The question MUST focus on the subject (who or what) and the common context of the facts.
-3. Output ONLY the query content inside the <query> tag.
+## STRATEGY for "All-in-One" Query:
+1. **Identify Subject:** Start with the main subject (Person, Event, or Object).
+2. **Extract Keywords:** Extract key distinct attributes from the facts (e.g., dates, job titles, locations, specific works).
+3. **Combine:** Combine them into a single string.
+4. **Add Context:** Add keywords like "biography", "profile", "history", or "facts" to find comprehensive sources.
+
+## EXAMPLES
+
+[FACTS TO COVER]
+- Suthida is the Queen of Thailand.
+- She was born in Bangkok.
+- She worked as an executive.
+- She worked for Thai Airways.
+[RESPONSE]
+<query>Queen Suthida biography birth place Thai Airways career executive</query>
+(Reasoning: Covers identity, birth location, and specific career details)
+
+[FACTS TO COVER]
+- Inception was directed by Christopher Nolan.
+- It was released in 2010.
+- It stars Leonardo DiCaprio.
+- The movie is about dream invasion.
+[RESPONSE]
+<query>Inception movie Christopher Nolan 2010 cast plot summary</query>
+
+[FACTS TO COVER]
+- Josh Mansour is a rugby player.
+- He was born on March 17, 1990.
+- He played for Penrith Panthers.
+- He represented the City Origin team.
+[RESPONSE]
+<query>Josh Mansour rugby stats birth date Penrith Panthers City Origin career</query>
 
 [FACTS TO COVER]
 """
@@ -140,26 +168,13 @@ The final output must be suitable for a search engine query.
         prompt += f"- {f}\n"
     
     prompt += """
-## EXAMPLES
-[FACTS TO COVER]
-- The movie was directed by Christopher Nolan.
-- The movie was released in July 2010.
-- Leonardo DiCaprio starred in the movie.
-[RESPONSE]
-<query>Who directed and starred in the movie released in July 2010?</query>
-
-[FACTS TO COVER]
-- Elon Musk was born on June 28, 1971.
-- He was born in Pretoria, South Africa.
-[RESPONSE]
-<query>When and where was Elon Musk born?</query>
-
 [RESPONSE FORMAT]
-<query>Single comprehensive verification question/query</query>
+<query>Your comprehensive search query here</query>
 
 [RESPONSE]
 """
     return prompt
+
 # --- 5. Verification (3-Class Logic) ---
 VERIFICATION_ANSWER_TEMPLATE_RAG = """[INSTRUCTION] Answer the [QUESTION] using **ONLY** the [CONTEXT DOCUMENTS].
 Be concise and factual.
@@ -591,11 +606,12 @@ Write the polished text immediately below.
 BP_CORRECTION_TEMPLATE = """
 [INSTRUCTION]
 The following facts extracted from a single sentence contain errors.
-Your task is to correct them based on the [CONTEXT].
+Your task is to correct them based **STRICTLY** on the provided [CONTEXT].
 
 **CRITICAL RULES**:
 1. **Logic Propagation**: If you change a key detail in the first fact (e.g., "Executive" -> "Flight Attendant"), you **MUST update the subsequent facts** to match that change contextually.
-2. **XML Output**: Provide the output strictly in XML format as shown in the example.
+2. **Evidence Constraint**: If the [CONTEXT] does NOT contain the necessary information to fix an error, **DO NOT GUESS**. In such cases, keep the content of <fixed> exactly the same as <original>.
+3. **XML Output**: Provide the output strictly in XML format as shown in the example.
 
 [CONTEXT]
 {context}
@@ -604,16 +620,16 @@ Your task is to correct them based on the [CONTEXT].
 {error_block}
 
 [OUTPUT FORMAT EXAMPLE]
-(Input Errors: "1. He was a pilot. 2. The pilot job was hard.")
+(Input Errors: "1. He was a pilot. 2. He was born on Mars.")
+(Context says he is a doctor, but says nothing about his birthplace.)
 
 <correction>
     <original>He was a pilot.</original>
     <fixed>He was a doctor.</fixed>
 </correction>
 <correction>
-    <original>The pilot job was hard.</original>
-    <fixed>The doctor job was hard.</fixed>
-</correction>
+    <original>He was born on Mars.</original>
+    <fixed>He was born on Mars.</fixed>  </correction>
 
 [YOUR RESPONSE]
 (Write only the XML corrections below)
