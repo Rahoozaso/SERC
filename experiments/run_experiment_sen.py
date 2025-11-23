@@ -100,7 +100,16 @@ def prompt_extract_rag_desc(query: str, context: str, model_name: str, config: d
 def prompt_judge_entity_consistency(a: str, b: str, model_name: str, config: dict) -> bool:
     prompt = ENTITY_CONSISTENCY_JUDGE_TEMPLATE.format(desc_a=a, desc_b=b)
     raw = generate(prompt, model_name, config)
-    return "YES" in _extract_xml_tag(raw, "judgment").upper() or "YES" in raw.upper()
+    if "YES" in _extract_xml_tag(raw, "judgment").upper():
+        return True
+    elif "NO" in _extract_xml_tag(raw, "judgment").upper():
+        return False
+    elif "YES" in raw.upper():
+         return True
+    elif "NO" in raw.upper():
+        return False
+    else:
+        return True
 
 def prompt_regenerate_baseline_rag(query: str, context: str, model_name: str, config: dict) -> str:
     prompt = BASELINE_PROMPT_TEMPLATE_RAG_FIRST.format(context=context, query=query)
@@ -122,12 +131,9 @@ def prompt_extract_facts_from_sentence(sentence: str, model_name: str, config: d
     if facts_block_match:
         # 1순위: <facts> 블록 안에서 검색
         content_to_search = facts_block_match.group(1)
-        logging.info("  [Extract Method] PRIMARY: Targeting content inside <facts> block.")
     else:
         # 2순위: 전체 텍스트에서 검색 (Fallback)
         content_to_search = raw
-        logging.info("  [Extract Method] FALLBACK: <facts> block not found. Searching raw output.")
-
     # 3. XML 태그 추출
     facts = re.findall(r"<fact>(.*?)</fact>", content_to_search, re.DOTALL | re.IGNORECASE)
     
@@ -155,7 +161,7 @@ def _prompt_generate_question_for_sentence_group(facts: List[str], model_name: s
     return q if q else f"{_clean_model_output(raw)} {main_subject}"
 
 def _prompt_get_verification_answer(question: str, model_name: str, config: dict, context: str) -> str:
-    prompt = VERIFICATION_ANSWER_TEMPLATE_RAG.format(query=question, context=context)
+    prompt = VERIFICATION_ANSWER_TEMPLATE_RAG.format(query=question, context=context,generation_params_override={"temperature": 0.1, "max_new_tokens": 512})
     raw = generate(prompt, model_name, config)
     return _clean_model_output(raw)
 
@@ -301,7 +307,8 @@ def SERC(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, Any]:
         "don't have information" in baseline.lower() or
         "unable to provide" in baseline.lower() or
         "not have access" in baseline.lower() or
-        "i couldn't find" in baseline.lower()
+        "i couldn't find" in baseline.lower() or
+        "limited information" in baseline.lower()
     )
     logging.info(f"Is Refusal: {is_refusal}")
 

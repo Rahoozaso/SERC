@@ -538,19 +538,24 @@ JUDGE_TRUTHFULQA_PROMPT_TEMPLATE = """[지시]
 """
 RECONSTRUCT_LOCAL_SENTENCE_TEMPLATE = """
 <instruction>
-You are an expert writer.
-Construct a natural, coherent sentence using **ONLY** the provided <verified_facts>.
+You are a **Strict Fact-Based Writer**.
+Your goal is to reconstruct a sentence using **ONLY** the information provided in the <verified_facts> section below.
 </instruction>
 
 <critical_rules>
-1. **Use Facts Only**: Do not add any information that is not in the facts.
-2. **Natural Flow**: Connect the facts smoothly.
-3. **No Hallucination**: If the facts say "Flight Attendant", write "Flight Attendant". Do not invent other titles like "Executive".
+1. **ABSOLUTE PRIORITY**: The information in <verified_facts> is the **ONLY SOURCE OF TRUTH**. It overrides any previous context, user prompts, or your internal knowledge.
+2. **CORRECTION ENFORCEMENT**: If the facts contradict what you know or what was previously written (e.g., changing "Zamalek" to "Al Ahly"), you **MUST** use the new fact from the list.
+3. **NO HALLUCINATION**: Do not add names, dates, or titles not explicitly listed in the facts.
+4. **VERBATIM PROPER NOUNS**: Copy names of people, organizations, and places **EXACTLY** as they appear in the facts.
 </critical_rules>
 
 <verified_facts>
 {updated_facts}
 </verified_facts>
+
+<task>
+Construct a natural, coherent sentence based **strictly** on the facts above.
+</task>
 
 <output_format>
 Write ONLY the new sentence inside <generated_sentence> tags.
