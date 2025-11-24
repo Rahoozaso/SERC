@@ -198,7 +198,7 @@ def prompt_reconstruct_local_sentence(original_sentence: str, updated_facts: Lis
 
 def prompt_global_polish(query: str, draft_text: str, model_name: str, config: dict) -> str:
     prompt = GLOBAL_POLISH_TEMPLATE.format(query=query, draft_text=draft_text)
-    raw = generate(prompt, model_name, config,generation_params_override={"temperature": 0.2, "max_new_tokens": 256})
+    raw = generate(prompt, model_name, config,generation_params_override={"temperature": 0.4, "max_new_tokens": 256})
     modified_raw = f"<final_response>{raw}"
     return _extract_xml_tag(modified_raw, "final_response") or _clean_model_output(modified_raw)
 
@@ -240,7 +240,7 @@ def _detect_syndromes_batch(sentence_batches: List[Dict],
                 logging.info(f"Error Detected: {fact[:30]}...")
                 logging.warning(f"   📌 Fact: {fact}")
                 logging.warning(f"   🔗 Origin: {batch['sentence'][:50]}...")
-            elif verdict == "CONTRADICTED":
+            elif verdict == "NOT_FOUND":
                 facts_to_delete.append(fact)
                 logging.warning(f"🗑️ Not Found (Unverified): {fact[:30]}")
     
