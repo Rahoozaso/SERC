@@ -172,7 +172,7 @@ def _prompt_get_verification_answer(question: str, model_name: str, config: dict
 
 def prompt_validate_one_fact_against_evidence(fact: str, evidence: str, model_name: str, config: dict) -> str:
     prompt = VALIDATE_EVIDENCE_TEMPLATE.format(fact_text=fact, evidence_text=evidence)
-    raw = generate(prompt, model_name, config)
+    raw = generate(prompt, model_name, config,generation_params_override={"temperature": 0.1, "max_new_tokens": 256})
     judgment = _extract_xml_tag(raw, "judgment").upper()
     if "CONTRADICTED" in judgment: return "CONTRADICTED"
     if "SUPPORTED" in judgment: return "SUPPORTED"
@@ -198,7 +198,7 @@ def prompt_reconstruct_local_sentence(original_sentence: str, updated_facts: Lis
 
 def prompt_global_polish(query: str, draft_text: str, model_name: str, config: dict) -> str:
     prompt = GLOBAL_POLISH_TEMPLATE.format(query=query, draft_text=draft_text)
-    raw = generate(prompt, model_name, config)
+    raw = generate(prompt, model_name, config,generation_params_override={"temperature": 0.2, "max_new_tokens": 256})
     modified_raw = f"<final_response>{raw}"
     return _extract_xml_tag(modified_raw, "final_response") or _clean_model_output(modified_raw)
 
