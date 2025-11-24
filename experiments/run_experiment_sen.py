@@ -10,6 +10,7 @@ import random
 import numpy as np
 import torch
 import gc
+from difflib import get_close_matches
 
 # --- Project path setup ---
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -171,8 +172,7 @@ def _prompt_get_verification_answer(question: str, model_name: str, config: dict
 
 def prompt_validate_one_fact_against_evidence(fact: str, evidence: str, model_name: str, config: dict) -> str:
     prompt = VALIDATE_EVIDENCE_TEMPLATE.format(fact_text=fact, evidence_text=evidence)
-    raw = generate(prompt, model_name, config,
-                   generation_params_override={"temperature": 0.1, "max_new_tokens": 1024})
+    raw = generate(prompt, model_name, config)
     judgment = _extract_xml_tag(raw, "judgment").upper()
     if "CONTRADICTED" in judgment: return "CONTRADICTED"
     if "SUPPORTED" in judgment: return "SUPPORTED"
@@ -191,16 +191,14 @@ def prompt_reconstruct_local_sentence(original_sentence: str, updated_facts: Lis
         original_sentence=original_sentence,
         updated_facts=fact_list_str
     )
-    raw = generate(prompt, model_name, config,
-                   generation_params_override={"temperature": 0.3, "max_new_tokens": 512})
+    raw = generate(prompt, model_name, config)
     modified_raw = f"<generated_sentence>{raw}"
     # XML 태그 추출
     return _extract_xml_tag(modified_raw, "generated_sentence") or _clean_model_output(modified_raw)
 
 def prompt_global_polish(query: str, draft_text: str, model_name: str, config: dict) -> str:
     prompt = GLOBAL_POLISH_TEMPLATE.format(query=query, draft_text=draft_text)
-    raw = generate(prompt, model_name, config,
-                   generation_params_override={"temperature": 0.5, "max_new_tokens": 1024})
+    raw = generate(prompt, model_name, config)
     modified_raw = f"<final_response>{raw}"
     return _extract_xml_tag(modified_raw, "final_response") or _clean_model_output(modified_raw)
 
@@ -215,6 +213,7 @@ def _detect_syndromes_batch(sentence_batches: List[Dict],
                             main_subject: str) -> Dict[str, Any]:
     clean_facts = []
     syndromes_buffer = [] 
+    facts_to_delete = []
 
     logging.info(">>> [Step 1] Syndrome Detection Started (Collecting Errors...)")
     
@@ -241,10 +240,14 @@ def _detect_syndromes_batch(sentence_batches: List[Dict],
                 logging.info(f"Error Detected: {fact[:30]}...")
                 logging.warning(f"   📌 Fact: {fact}")
                 logging.warning(f"   🔗 Origin: {batch['sentence'][:50]}...")
+            elif verdict == "CONTRADICTED":
+                facts_to_delete.append(fact)
+                logging.warning(f"🗑️ Not Found (Unverified): {fact[:30]}")
     
     return {
         "clean_facts": clean_facts,
-        "syndromes_buffer": syndromes_buffer
+        "syndromes_buffer": syndromes_buffer,
+        "facts_to_delete": facts_to_delete
     }
 
 def _correct_syndromes_batch(syndromes_buffer: List[Dict], 
@@ -255,39 +258,66 @@ def _correct_syndromes_batch(syndromes_buffer: List[Dict],
     if not syndromes_buffer:
         logging.info(">>> [Step 2] No errors to fix. Skipping correction.")
         return {}
+
+    # 1. 문장별로 오류 그룹화
     error_groups = defaultdict(list)
     for item in syndromes_buffer:
         error_groups[item["origin_sentence"]].append(item)
 
     logging.info(f">>> [Step 2] BP Correction Started ({len(error_groups)} sentence groups)")
 
-    for sentence, items in tqdm(error_groups.items(), desc="Phase 2: Correcting with XML"):
+    for sentence, items in tqdm(error_groups.items(), desc="Phase 2: Correcting"):
         context = items[0]["context"]
+        
+        # [중요] 이 리스트가 바로 '정답지(Key)' 목록입니다.
+        original_facts_list = [item['original_fact'] for item in items]
+
+        # 프롬프트에 넣을 에러 블록 생성
         error_block = ""
-        for i, item in enumerate(items, 1):
-            error_block += f"{i}. {item['original_fact']}\n"
+        for i, fact in enumerate(original_facts_list, 1):
+            error_block += f"{i}. {fact}\n"
+        
         prompt = BP_CORRECTION_TEMPLATE.format(
             context=context,
             error_block=error_block
         )
         
-        raw_output = generate(prompt, model_name, config,generation_params_override={"max_new_tokens": 512, "temperature": 0.1 })
+        # 토큰 넉넉히 (잘림 방지)
+        raw_output = generate(prompt, model_name, config, 
+                              generation_params_override={"max_new_tokens": 256, "temperature": 0.1})
+        
+        # XML 파싱
         correction_blocks = re.findall(r"<correction>(.*?)</correction>", raw_output, re.DOTALL | re.IGNORECASE)
         
         for block in correction_blocks:
-            # 2. 블록 내부에서 original과 fixed 추출
             orig_match = re.search(r"<original>(.*?)</original>", block, re.DOTALL | re.IGNORECASE)
             fixed_match = re.search(r"<fixed>(.*?)</fixed>", block, re.DOTALL | re.IGNORECASE)
             
             if orig_match and fixed_match:
-                # 태그 안의 텍스트 추출 및 정리
-                clean_orig = orig_match.group(1).strip()
+                llm_orig = orig_match.group(1).strip()
                 clean_corr = fixed_match.group(1).strip()
-                clean_orig = re.sub(r'^[\d\-\.\)\s]+', '', clean_orig)
                 
-                if clean_orig and clean_corr:
-                    fact_correction_map[clean_orig] = clean_corr
-                    logging.info(f"XML Fixed: {clean_orig[:15]}... -> {clean_corr[:15]}...")
+                # (1) LLM이 쓴 원본 텍스트에서 숫자/기호 제거 (매칭률 높이기 위해)
+                llm_orig_clean = re.sub(r'^[\d\-\.\)\s]+', '', llm_orig)
+                
+                # (2) [핵심] 유사도 매칭 (Fuzzy Matching)
+                # LLM이 쓴 것과 가장 비슷한 진짜 팩트를 original_facts_list에서 찾습니다.
+                # cutoff=0.6: 60% 이상 비슷하면 같은 문장으로 간주
+                matches = get_close_matches(llm_orig_clean, original_facts_list, n=1, cutoff=0.6)
+                
+                if matches:
+                    true_key = matches[0]  # 찾은 '진짜 키'
+                    
+                    # (3) 맵에 저장 (빈 문자열도 '삭제' 의미로 저장됨)
+                    fact_correction_map[true_key] = clean_corr
+                    
+                    if clean_corr:
+                        logging.info(f"🔗 Matched: '{llm_orig_clean[:15]}...' -> Key: '{true_key[:15]}...'")
+                    else:
+                        logging.info(f"🗑️ Matched (Delete): '{true_key[:15]}...'")
+                else:
+                    # 매칭 실패 시 로그 (디버깅용)
+                    logging.warning(f"⚠️ Match Failed: LLM said '{llm_orig_clean}' but not found in list.")
             
     return fact_correction_map
 
@@ -380,6 +410,7 @@ def SERC(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, Any]:
     
     clean_facts = detection_result["clean_facts"]
     syndromes_buffer = detection_result["syndromes_buffer"]
+    facts_to_delete = detection_result["facts_to_delete"]
 
     # Step 4: Correction (Grouped Belief Propagation)
     fact_correction_map = _correct_syndromes_batch(
@@ -387,6 +418,10 @@ def SERC(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, Any]:
         model_name=model_name,
         config=config
     )
+    if facts_to_delete:
+        logging.info(f"Applying direct deletion for {len(facts_to_delete)} unverified facts.")
+        for f in facts_to_delete:
+            fact_correction_map[f] = ""  # 빈 문자열 = 삭제 (Step 5 로직에 의해)
 
     history["steps"]["syndromes_detected"] = len(syndromes_buffer)
     history["steps"]["fact_correction_map"] = fact_correction_map

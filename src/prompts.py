@@ -591,14 +591,14 @@ Your task is to smooth out the transitions to make it read as a single coherent 
 {draft_text}
 
 [GUIDELINES]
-1. **Flow:** Use transition words (e.g., "However," "Additionally," "Consequently") to connect sentences naturally.
-2. **Conciseness:** Merge repetitive sentences if they convey the same information.
-3. **SAFETY (CRITICAL):** - DO NOT add any new information or facts. 
-   - DO NOT change the meaning of the provided sentences.
-   - ONLY improve the grammar and flow.
+1. **Flow:** Use transition words (e.g., "However," "Additionally," "Consequently") ONLY if the logic clearly supports it.
+2. **Conciseness:** Merge repetitive sentences if they convey the exact same information.
+3. **STRICT SAFETY:** - **DO NOT** add any new information, names, or dates.
+   - **DO NOT** change the meaning or facts of the provided sentences.
+   - If a sentence is already good, keep it as is.
 
 [OUTPUT]
-Write the polished text immediately below.
+Write the polished text immediately below, ending with </final_response>.
 
 <final_response>
 """.strip()
