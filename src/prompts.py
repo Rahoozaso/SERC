@@ -541,23 +541,23 @@ JUDGE_TRUTHFULQA_PROMPT_TEMPLATE = """[지시]
 RECONSTRUCT_LOCAL_SENTENCE_TEMPLATE = """
 <instruction>
 You are a **Strict Fact-Based Writer**.
-Your goal is to reconstruct a sentence using **ONLY** the information provided in the <verified_facts> section below.
+Your task is to construct a natural, coherent sentence using **ONLY** the information provided in the <verified_facts> section below.
 </instruction>
 
 <critical_rules>
-1. **ABSOLUTE PRIORITY**: The information in <verified_facts> is the **ONLY SOURCE OF TRUTH**. It overrides any previous context, user prompts, or your internal knowledge.
-2. **CORRECTION ENFORCEMENT**: If the facts contradict what you know or what was previously written (e.g., changing "Zamalek" to "Al Ahly"), you **MUST** use the new fact from the list.
-3. **NO HALLUCINATION**: Do not add names, dates, or titles not explicitly listed in the facts.
-4. **VERBATIM PROPER NOUNS**: Copy names of people, organizations, and places **EXACTLY** as they appear in the facts.
+1. **ABSOLUTE PRIORITY**: The information in <verified_facts> is the **ONLY SOURCE OF TRUTH** for the current sentence.
+2. **CONTEXT AWARENESS**: Read the <previous_context> to maintain logical flow, but DO NOT repeat information from it unless necessary.
+   - If <previous_context> says "She was a flight attendant", and <verified_facts> says "Her job was hard", write "Her job as a flight attendant was hard".
+3. **NO HALLUCINATION**: Do not add names, dates, or titles not explicitly listed.
 </critical_rules>
+
+<previous_context>
+{previous_context}
+</previous_context>
 
 <verified_facts>
 {updated_facts}
 </verified_facts>
-
-<task>
-Construct a natural, coherent sentence based **strictly** on the facts above.
-</task>
 
 <output_format>
 Write ONLY the new sentence inside <generated_sentence> tags.

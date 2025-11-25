@@ -167,7 +167,7 @@ def _prompt_generate_question_for_sentence_group(facts: List[str], model_name: s
 
 def _prompt_get_verification_answer(question: str, model_name: str, config: dict, context: str) -> str:
     prompt = VERIFICATION_ANSWER_TEMPLATE_RAG.format(query=question, context=context,generation_params_override={"temperature": 0.1, "max_new_tokens": 512})
-    raw = generate(prompt, model_name, config)
+    raw = generate(prompt, model_name, config,generation_params_override={"max_new_tokens": 256, "temperature": 0.1})
     return _clean_model_output(raw)
 
 def prompt_validate_one_fact_against_evidence(fact: str, evidence: str, model_name: str, config: dict) -> str:
@@ -184,10 +184,11 @@ def prompt_generate_correct_fact(error_fact: str, model_name: str, config: dict,
     return _extract_xml_tag(raw, "corrected_fact") or _clean_model_output(raw)
 
 def prompt_reconstruct_local_sentence(original_sentence: str, updated_facts: List[str],
-                                      query: str, model_name: str, config: dict) -> str:
+                                      query: str, model_name: str, config: dict, previous_context: str = "") -> str:
     # [핵심] XML 방식: 원문은 무시하고 팩트 리스트로 새로 짓기
     fact_list_str = "\n".join(f"- {f}" for f in updated_facts)
     prompt = RECONSTRUCT_LOCAL_SENTENCE_TEMPLATE.format(
+        previous_context=previous_context,
         original_sentence=original_sentence,
         updated_facts=fact_list_str
     )
@@ -296,13 +297,7 @@ def _correct_syndromes_batch(syndromes_buffer: List[Dict],
             if orig_match and fixed_match:
                 llm_orig = orig_match.group(1).strip()
                 clean_corr = fixed_match.group(1).strip()
-                
-                # (1) LLM이 쓴 원본 텍스트에서 숫자/기호 제거 (매칭률 높이기 위해)
                 llm_orig_clean = re.sub(r'^[\d\-\.\)\s]+', '', llm_orig)
-                
-                # (2) [핵심] 유사도 매칭 (Fuzzy Matching)
-                # LLM이 쓴 것과 가장 비슷한 진짜 팩트를 original_facts_list에서 찾습니다.
-                # cutoff=0.6: 60% 이상 비슷하면 같은 문장으로 간주
                 matches = get_close_matches(llm_orig_clean, original_facts_list, n=1, cutoff=0.6)
                 
                 if matches:
@@ -429,6 +424,7 @@ def SERC(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, Any]:
     # Step 5: Local Sentence Reconstruction
     logging.info("--- Local Sentence Reconstruction ---")
     local_sentences = []
+    accumulated_facts = []
 
     for batch in sentence_batches:
         orig_sent = batch["sentence"]
@@ -443,6 +439,7 @@ def SERC(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, Any]:
                 has_changes = True  # 변경 발생!
             else:
                 updated_facts_list.append(f)
+        prev_context_str = "\n".join(f"- {f}" for f in accumulated_facts)
         
         if not has_changes:
             local_sentences.append(orig_sent)
@@ -455,10 +452,13 @@ def SERC(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, Any]:
             updated_facts=updated_facts_list,
             query=query,
             model_name=model_name,
-            config=config
+            config=config,
+            previous_context=prev_context_str
         )
         final_sent = reconstructed.strip() if reconstructed and len(reconstructed) > 10 else orig_sent
         local_sentences.append(final_sent)
+        if updated_facts_list:
+            accumulated_facts.extend(updated_facts_list)
 
     history["steps"]["local_sentences"] = local_sentences
 
