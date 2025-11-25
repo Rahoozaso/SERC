@@ -547,7 +547,6 @@ Your task is to construct a natural, coherent sentence using **ONLY** the inform
 <critical_rules>
 1. **ABSOLUTE PRIORITY**: The information in <verified_facts> is the **ONLY SOURCE OF TRUTH** for the current sentence.
 2. **CONTEXT AWARENESS**: Read the <previous_context> to maintain logical flow, but DO NOT repeat information from it unless necessary.
-   - If <previous_context> says "She was a flight attendant", and <verified_facts> says "Her job was hard", write "Her job as a flight attendant was hard".
 3. **NO HALLUCINATION**: Do not add names, dates, or titles not explicitly listed.
 </critical_rules>
 
