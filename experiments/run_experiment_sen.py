@@ -167,12 +167,12 @@ def _prompt_generate_question_for_sentence_group(facts: List[str], model_name: s
 
 def _prompt_get_verification_answer(question: str, model_name: str, config: dict, context: str) -> str:
     prompt = VERIFICATION_ANSWER_TEMPLATE_RAG.format(query=question, context=context,generation_params_override={"temperature": 0.1, "max_new_tokens": 512})
-    raw = generate(prompt, model_name, config,generation_params_override={"max_new_tokens": 256, "temperature": 0.1})
+    raw = generate(prompt, model_name, config,generation_params_override={"max_new_tokens": 400, "temperature": 0.1})
     return _clean_model_output(raw)
 
 def prompt_validate_one_fact_against_evidence(fact: str, evidence: str, model_name: str, config: dict) -> str:
     prompt = VALIDATE_EVIDENCE_TEMPLATE.format(fact_text=fact, evidence_text=evidence)
-    raw = generate(prompt, model_name, config,generation_params_override={"temperature": 0.1, "max_new_tokens": 256})
+    raw = generate(prompt, model_name, config,generation_params_override={"temperature": 0.0, "max_new_tokens": 400})
     judgment = _extract_xml_tag(raw, "judgment").upper()
     if "CONTRADICTED" in judgment: return "CONTRADICTED"
     if "SUPPORTED" in judgment: return "SUPPORTED"
@@ -199,7 +199,7 @@ def prompt_reconstruct_local_sentence(original_sentence: str, updated_facts: Lis
 
 def prompt_global_polish(query: str, draft_text: str, model_name: str, config: dict) -> str:
     prompt = GLOBAL_POLISH_TEMPLATE.format(query=query, draft_text=draft_text)
-    raw = generate(prompt, model_name, config,generation_params_override={"temperature": 0.4, "max_new_tokens": 256})
+    raw = generate(prompt, model_name, config,generation_params_override={"temperature": 0.1, "max_new_tokens": 256})
     modified_raw = f"<final_response>{raw}"
     return _extract_xml_tag(modified_raw, "final_response") or _clean_model_output(modified_raw)
 
@@ -268,7 +268,9 @@ def _correct_syndromes_batch(syndromes_buffer: List[Dict],
     logging.info(f">>> [Step 2] BP Correction Started ({len(error_groups)} sentence groups)")
 
     for sentence, items in tqdm(error_groups.items(), desc="Phase 2: Correcting"):
-        context = items[0]["context"]
+        # [변경 포인트 1] Raw Context 대신 정제된 검증 답안(Evidence) 사용
+        # items[0]["context"] -> items[0]["evidence"]
+        evidence_context = items[0]["evidence"] 
         
         # [중요] 이 리스트가 바로 '정답지(Key)' 목록입니다.
         original_facts_list = [item['original_fact'] for item in items]
@@ -278,16 +280,31 @@ def _correct_syndromes_batch(syndromes_buffer: List[Dict],
         for i, fact in enumerate(original_facts_list, 1):
             error_block += f"{i}. {fact}\n"
         
+        # 템플릿 포맷팅 (context 자리에 evidence를 넣습니다)
         prompt = BP_CORRECTION_TEMPLATE.format(
-            context=context,
+            context=evidence_context,  # <--- 여기가 핵심 변경 사항
             error_block=error_block
         )
         
-        # 토큰 넉넉히 (잘림 방지)
-        raw_output = generate(prompt, model_name, config, 
-                              generation_params_override={"max_new_tokens": 256, "temperature": 0.1})
+        # [변경 포인트 2] Pre-filling (앵무새 방지 강제 주입)
+        # 프롬프트 끝에 시작 태그를 미리 붙여서 보냅니다.
+        prompt_with_prefill = prompt.strip() + "\n<correction>"
+
+        # 생성 호출
+        # stop_strings를 사용하여 사족을 자릅니다 (transformers pipeline 사용 시)
+        # 여기서는 raw 텍스트 후처리에 의존하는 방식 유지
+        raw_output_fragment = generate(prompt_with_prefill, model_name, config, 
+                                       generation_params_override={
+                                           "max_new_tokens": 256, 
+                                           "temperature": 0.1,
+                                           # 지원되는 경우 stop_strings 추가 권장
+                                           # "stop_strings": ["</correction>\n\n", "```"] 
+                                       })
         
-        # XML 파싱
+        # 모델은 <correction> 뒷부분만 뱉으므로, 앞부분을 다시 붙여서 완성
+        raw_output = "<correction>" + raw_output_fragment
+
+        # XML 파싱  
         correction_blocks = re.findall(r"<correction>(.*?)</correction>", raw_output, re.DOTALL | re.IGNORECASE)
         
         for block in correction_blocks:
@@ -297,13 +314,17 @@ def _correct_syndromes_batch(syndromes_buffer: List[Dict],
             if orig_match and fixed_match:
                 llm_orig = orig_match.group(1).strip()
                 clean_corr = fixed_match.group(1).strip()
+                
+                # 원본 매칭을 위한 전처리 (숫자, 기호 제거)
                 llm_orig_clean = re.sub(r'^[\d\-\.\)\s]+', '', llm_orig)
-                matches = get_close_matches(llm_orig_clean, original_facts_list, n=1, cutoff=0.6)
+                
+                # [변경 포인트 3] Fuzzy Matching 도입 (유사도 기반 매칭)
+                matches = get_close_matches(llm_orig_clean, original_facts_list, n=1, cutoff=0.7) # cutoff 0.6 -> 0.7 상향 조정 권장
                 
                 if matches:
                     true_key = matches[0]  # 찾은 '진짜 키'
                     
-                    # (3) 맵에 저장 (빈 문자열도 '삭제' 의미로 저장됨)
+                    # 맵에 저장
                     fact_correction_map[true_key] = clean_corr
                     
                     if clean_corr:
@@ -311,7 +332,7 @@ def _correct_syndromes_batch(syndromes_buffer: List[Dict],
                     else:
                         logging.info(f"🗑️ Matched (Delete): '{true_key[:15]}...'")
                 else:
-                    # 매칭 실패 시 로그 (디버깅용)
+                    # 매칭 실패 시 로그
                     logging.warning(f"⚠️ Match Failed: LLM said '{llm_orig_clean}' but not found in list.")
             
     return fact_correction_map

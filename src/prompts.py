@@ -180,15 +180,12 @@ VALIDATE_EVIDENCE_TEMPLATE = """[INSTRUCTION] Compare the [CLAIM] against the [E
 Act as a **Strict Fact Checker**.
 
 [JUDGMENT RULES]
-1. **CONTRADICTED**:
-   - Direct Conflict: Evidence says "1970" vs Claim says "1990".
-   - Role Incompatibility: If Evidence says "She has no children", Claim "She has a son" is CONTRADICTED.
-
-2. **SUPPORTED**:
-   - The evidence explicitly confirms the core of the claim.
-
-3. **NOT_FOUND**:
-   - The evidence is completely silent on the topic. (Only use this if the topic is totally unrelated to the search results).
+1. **SUPPORTED**: The evidence actively confirms the claim. (100% Match)
+2. **CONTRADICTED**:
+   - Any conflict in facts, numbers, dates, or **quality/sentiment**.
+   - If Evidence casts *doubt* on the Claim's core attribute, it is CONTRADICTED.
+   - **Do not use "Not Found" for conflicts.**
+3. **NOT_FOUND**: The topic is completely missing from the text.
 
 [CLAIM]
 {fact_text}
@@ -197,10 +194,13 @@ Act as a **Strict Fact Checker**.
 {evidence_text}
 
 [RESPONSE FORMAT]
+Output **ONLY** the following XML structure.
 <reasoning>
-Explain why it matches or contradicts Shortly.
+1. Match Check: [Do they agree?]
+2. Conflict Check: [Is there ANY negative evidence?]
+3. Decisive Verdict: [Explain why they cannot coexist]
 </reasoning>
-<judgment>CONTRADICTED or SUPPORTED or NOT_FOUND</judgment>
+<judgment>SUPPORTED or CONTRADICTED or NOT_FOUND</judgment>
 
 [RESPONSE]
 """
@@ -545,9 +545,10 @@ Your task is to construct a natural, coherent sentence using **ONLY** the inform
 </instruction>
 
 <critical_rules>
-1. **ABSOLUTE PRIORITY**: The information in <verified_facts> is the **ONLY SOURCE OF TRUTH** for the current sentence.
-2. **CONTEXT AWARENESS**: Read the <previous_context> to maintain logical flow, but DO NOT repeat information from it unless necessary.
-3. **NO HALLUCINATION**: Do not add names, dates, or titles not explicitly listed.
+1. **ABSOLUTE PRIORITY**: The information in <verified_facts> is the **ONLY SOURCE OF TRUTH**.
+2. **NO HALLUCINATION**: Do not add names, dates, or titles not explicitly listed.
+3. **NO META-COMMENTARY**: Do not output comments, notes, explanations, or "Incorrect examples". 
+4. **SINGLE OUTPUT**: Write the sentence ONCE and stop immediately.
 </critical_rules>
 
 <previous_context>
@@ -559,7 +560,7 @@ Your task is to construct a natural, coherent sentence using **ONLY** the inform
 </verified_facts>
 
 <output_format>
-Write ONLY the new sentence inside <generated_sentence> tags.
+Output strictly the sentence content inside the tags.
 </output_format>
 
 <generated_sentence>
@@ -577,48 +578,53 @@ Your task is to smooth out the transitions to make it read as a single coherent 
 {draft_text}
 
 [GUIDELINES]
-1. **Flow:** Use transition words (e.g., "However," "Additionally," "Consequently") ONLY if the logic clearly supports it.
-2. **Conciseness:** Merge repetitive sentences if they convey the exact same information.
-3. **STRICT SAFETY:** - **DO NOT** add any new information, names, or dates.
-   - **DO NOT** change the meaning or facts of the provided sentences.
-   - If a sentence is already good, keep it as is.
+1. **Flow:** Use transition words ONLY if logic supports it.
+2. **Conciseness:** Merge repetitive sentences.
+3. **STRICT SAFETY:** DO NOT add new info/facts. Keep the meaning unchanged.
+4. **NO COMMENTARY:** **DO NOT** include any "Note:", "Explanation:", or preamble. Output **ONLY** the polished text.
 
 [OUTPUT]
-Write the polished text immediately below, ending with </final_response>.
+Write the polished text immediately below.
 
 <final_response>
-""".strip()
+"""
 
 BP_CORRECTION_TEMPLATE = """
 [INSTRUCTION]
-The following facts extracted from a single sentence contain errors.
-Your task is to correct them based **STRICTLY** on the provided [CONTEXT].
+You are a **Strict Fact Corrector**.
+Your goal is to correct the list of [ERROR FACTS] based **ONLY** on the provided [VERIFIED EVIDENCE].
 
-**CRITICAL RULES**:
-1. **Logic Propagation**: If you change a key detail in the first fact (e.g., "Executive" -> "Flight Attendant"), you **MUST update the subsequent facts** to match that change contextually.
-2. **Evidence Constraint**: If the [CONTEXT] does NOT contain the necessary information to fix an error, **DO NOT GUESS**. In such cases, keep the content of <fixed> exactly the same as <original>.
-3. **XML Output**: Provide the output strictly in XML format as shown in the example.
+**CRITICAL EXECUTION RULES**:
+1. **EXACT COPY (Crucial)**: The content inside `<original>` MUST be a **word-for-word copy** of a sentence from the [ERROR FACTS] list below. **DO NOT** invent or paraphrase the original errors.
+2. **LOGIC PROPAGATION (Cascading Fixes)**: If you correct a key attribute in an early sentence (e.g., changing "Pilot" to "Doctor"), you **MUST update subsequent sentences** to match that change contextually.
+   - *Example*: If you fix "He is a pilot" to "He is a doctor", then the next sentence "He flies planes" must be fixed to "He treats patients" (if supported by context).
+3. **EVIDENCE CONSTRAINT**: All corrections must be derived **strictly** from the [CONTEXT]. If the [CONTEXT] lacks information to fix an error, keep `<fixed>` **identical** to `<original>`. **DO NOT GUESS**.
+4. **TOPIC PRESERVATION**: The `<fixed>` sentence must address the **same aspect** (e.g., profession, location, action) as the `<original>` sentence unless Logic Propagation (Rule 2) requires a semantic shift.
+   - *Bad*: <original>He was a pitcher.</original> -> <fixed>He died in 2019.</fixed> (Unrelated topic)
+5. **FORMAT**: Output strictly in XML. No markdown (```), no notes.
 
-[CONTEXT]
+[VERIFIED EVIDENCE]
 {context}
 
-[ERROR FACTS]
+[ERROR FACTS] (Source of <original>)
 {error_block}
 
-[OUTPUT FORMAT EXAMPLE]
-(Input Errors: "1. He was a pilot. 2. He was born on Mars.")
-(Context says he is a doctor, but says nothing about his birthplace.)
+### EXAMPLE ###
+(Context: "John is a baker. He bakes bread in Seoul.")
+(Error Facts: "1. John is a pilot. 2. He flies planes in Busan.")
 
 <correction>
-    <original>He was a pilot.</original>
-    <fixed>He was a doctor.</fixed>
+    <original>John is a pilot.</original>
+    <fixed>John is a baker.</fixed>
 </correction>
 <correction>
-    <original>He was born on Mars.</original>
-    <fixed>He was born on Mars.</fixed>  </correction>
+    <original>He flies planes in Busan.</original>
+    <fixed>He bakes bread in Seoul.</fixed> 
+    </correction>
+### END OF EXAMPLE ###
 
 [YOUR RESPONSE]
-(Write only the XML corrections below)
+<correction>
 """
 SELF_VALIDATE_TEMPLATE = """[INSTRUCTION]
 You are a strict fact-checker. Verify the following [CLAIM] based on your internal knowledge.
