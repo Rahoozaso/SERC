@@ -55,8 +55,9 @@ logger = logging.getLogger(__name__)
 def _extract_xml_tag(text: str, tag: str) -> str:
     if not text:
         return ""
-    pattern = f"<{tag}>(.*?)</{tag}>"
-    match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
+    pattern1 = f"<{tag}>(.*?)</{tag}>"
+    pattern2 = f"({tag})(.*?)</{tag}>"
+    match = re.search(pattern1 or pattern2, text, re.DOTALL | re.IGNORECASE)
     if match:
         return match.group(1).strip()
     close_tag = f"</{tag}>"
