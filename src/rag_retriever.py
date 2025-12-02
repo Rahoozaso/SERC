@@ -12,7 +12,7 @@ class RAGRetriever:
             logger.warning("[RAGRetriever] TAVILY_API_KEY not set.")
         
         rag_config = config.get('rag_config', {})
-        self.top_k = rag_config.get('rag_top_k_results', 5) 
+        self.top_k = rag_config.get('rag_top_k_results', 8) 
         self.search_depth = rag_config.get('search_depth', "advanced") 
         self.max_ctx_chars = rag_config.get('max_context_characters', 20000) # 20k로 넉넉하게
 

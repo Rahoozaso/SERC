@@ -669,3 +669,22 @@ Your task is to correct them based on your **accurate internal knowledge**.
 
 [YOUR RESPONSE]
 """
+COVE_VERIFICATION_ANSWER_NO_RAG_TEMPLATE = """[INSTRUCTION]
+Answer the following verification question based **ONLY on your internal factual knowledge**.
+Act as a strict objective encyclopedia.
+
+**RULES**:
+1. Answer in a single, concise sentence.
+2. Do NOT make up information.
+3. Start the sentence with the main subject's name.
+
+[EXAMPLE]
+[QUESTION] What year was the Eiffel Tower completed?
+[FACTUAL ANSWER] The Eiffel Tower was completed in 1889.
+
+[TASK]
+[QUESTION]
+{question}
+
+[FACTUAL ANSWER]
+"""
