@@ -50,4 +50,4 @@ data_paths:
 
 # --- Result Paths ---
 results_base_dir: "results" # 모델/데이터셋별 결과 저장 기본 디렉토리
-evaluator_model_name: "gpt-5"
+evaluator_model_name: "gemini-3-pro-preview"

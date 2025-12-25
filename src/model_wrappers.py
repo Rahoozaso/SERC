@@ -1,15 +1,20 @@
 import os
 from dotenv import load_dotenv
+import json
 import time
 import random
 from typing import Dict, Any, Optional
+import logging
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from src.utils import token_tracker
+from google import genai
+from google.genai import types
 
+logger = logging.getLogger(__name__)
 load_dotenv()
 _loaded_models = {}
-
+_loaded_eval_models = {}
 # --- Hugging Face 토큰 로드 (필요시) ---
 def _get_huggingface_token(config: Dict[str, Any]) -> Optional[str]:
     """환경 변수 HF_TOKEN 또는 config 파일에서 Hugging Face 토큰을 가져옵니다."""
@@ -21,6 +26,104 @@ def _get_huggingface_token(config: Dict[str, Any]) -> Optional[str]:
         return token
     print(f"경고: Hugging Face 토큰을 환경 변수 {env_var} 또는 config에서 찾을 수 없습니다. (접근 제한 모델 로딩 불가)")
     return None
+
+
+def evaluate_generate(prompt: str, model_name: str, config: Dict[str, Any], 
+                      generation_params_override: Optional[Dict[str, Any]] = None) -> str:
+    
+    # 1. 모델 설정
+    model_config = next((m for m in config.get('models', []) if m.get('name') == model_name), None)
+    provider = model_config.get('provider') if model_config else ("google" if "gemini" in model_name.lower() else "openai")
+
+    # 2. 파라미터
+    gen_params = {"temperature": 0.0}
+    if model_config and 'generation_params' in model_config:
+        gen_params.update(model_config['generation_params'])
+    if generation_params_override:
+        gen_params.update(generation_params_override)
+
+    # 3. 재시도 로직
+    max_retries = 5
+    base_wait = 10
+
+    for attempt in range(max_retries + 1):
+        try:
+            # ---------------------------------------------------------
+            # Provider 1: Google Gemini (New SDK: google-genai)
+            # ---------------------------------------------------------
+            if provider == "google" or "gemini" in model_name.lower():
+                api_key = os.environ.get("GOOGLE_API_KEY")
+                if not api_key:
+                    raise ValueError("GOOGLE_API_KEY가 설정되지 않았습니다.")
+
+                # [수정됨] configure() 대신 Client 객체 생성
+                client = genai.Client(api_key=api_key)
+                
+                # 안전 설정 (모두 허용)
+                safety_settings = [
+                    types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="BLOCK_NONE"),
+                    types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="BLOCK_NONE"),
+                    types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="BLOCK_NONE"),
+                    types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="BLOCK_NONE"),
+                ]
+
+                # Thinking Config 설정
+                generate_config = types.GenerateContentConfig(
+                    temperature=gen_params.get("temperature", 0.0),
+                    max_output_tokens=8192,  # 넉넉한 토큰
+                    response_mime_type="application/json",
+                    
+                    # Thinking 설정 적용
+                    thinking_config=types.ThinkingConfig(
+                        include_thoughts=False,
+                        thinking_level="LOW"
+                    ),
+                    safety_settings=safety_settings
+                )
+
+                # API 호출
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt,
+                    config=generate_config
+                )
+                
+                # 결과 처리
+                if response.text:
+                    return response.text.strip()
+                else:
+                    logger.warning(f"[{model_name}] 빈 응답 발생.")
+                    return json.dumps({"score": 0, "reasoning": "Empty Response", "is_misconception": False})
+
+            # ---------------------------------------------------------
+            # Provider 2: OpenAI
+            # ---------------------------------------------------------
+            elif provider == "openai" or "gpt" in model_name.lower():
+                from openai import OpenAI
+                client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+                api_args = {
+                    "model": model_name,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.0,
+                }
+                if gen_params.get("response_mime_type") == "application/json":
+                    api_args["response_format"] = {"type": "json_object"}
+                
+                resp = client.chat.completions.create(**api_args)
+                return resp.choices[0].message.content
+
+        except Exception as e:
+            error_str = str(e)
+            if "429" in error_str or "quota" in error_str.lower() or "RESOURCE_EXHAUSTED" in error_str:
+                wait_time = base_wait * (2 ** attempt)
+                logger.warning(f"Rate Limit(429) 감지. {wait_time}초 대기 후 재시도... ({attempt+1}/{max_retries})")
+                time.sleep(wait_time)
+            else:
+                logger.error(f"API Error: {e}")
+                return json.dumps({"score": 0, "reasoning": f"API Error: {str(e)}", "is_misconception": False})
+
+    return json.dumps({"score": 0, "reasoning": "Timeout/RateLimit Failed", "is_misconception": False})
+
 
 # --- 메인 생성 함수 ---
 def generate(prompt: str, model_name: str, config: Dict[str, Any],
