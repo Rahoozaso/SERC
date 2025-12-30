@@ -165,7 +165,6 @@ def run_re_ex(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, 
         logging.info(f"    Explanation: {explanation[:100]}...")
 
         # --- 3단계: 최종 수정 (Revision) ---
-        # 설명 단계에서 "None"이 나오면 원본 유지 (효율성)
         if "None" in explanation or "no factual errors" in explanation.lower():
             logging.info("    오류 없음 감지 -> 원본 유지")
             final_output = initial_response
