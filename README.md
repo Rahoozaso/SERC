@@ -1,4 +1,3 @@
-```markdown
 # SERC: Semantic Error-Reduction and Correction Framework
 
 <div align="center">
@@ -6,10 +5,7 @@
 
 > **Abstract:** This repository contains the official implementation of **SERC** (Semantic Error-Reduction and Correction). SERC addresses LLM hallucinations by re-conceptualizing text generation as a transmission process over a *Semantic Noisy Channel*. Inspired by Error Correcting Codes (ECC) and LDPC codes, it employs a sparse verification strategy to detect and correct errors using Retrieval-Augmented Generation (RAG).
 
----
-
 ## 📂 Project Structure
-
 ```text
 .
 ├── .env                    # API Keys (OpenAI, Tavily, Google, etc.)
@@ -31,17 +27,13 @@
 │   └── prompts.py          # Prompt Templates
 ├── data/                   # Dataset directory
 └── notebooks/              # Analysis notebooks
-
 ```
-
----
 
 ## ⚡ Quick Start
 
 ### 1. Installation
 
 **Prerequisites:** [Anaconda](https://www.anaconda.com/) or Miniconda.
-
 ```bash
 # 1. Create Conda Environment
 conda env create -f environment.yml
@@ -51,7 +43,6 @@ conda activate serc_env
 
 # 3. Download NLTK Data (Required for sentence splitting)
 python -c "import nltk; nltk.download('punkt'); nltk.download('punkt_tab')"
-
 ```
 
 ### 2. Configuration (`.env`)
@@ -64,10 +55,8 @@ OPENAI_API_KEY="your key"
 TAVILY_API_KEY="your key"
 GOOGLE_API_KEY="your key" 
 OPENAI_API_KEY="your key"
-
 ```
 
----
 
 ## 🚀 Usage
 
@@ -88,12 +77,20 @@ python experiments/run_SERC.py \
     --model "meta-llama/Meta-Llama-3-8B-Instruct" \
     --dataset "longform_bio" \
     --output_dir "results/serc"
-
 ```
 
 ### 2. Run Baselines
 
 We provide implementations for key baselines used in the paper.
+
+**CoVe (Chain-of-Verification):**
+
+```bash
+python baselines/run_cove.py \
+    --model "meta-llama/Meta-Llama-3-8B-Instruct" \
+    --dataset "longform_bio"
+
+```
 
 **CoVe (Chain-of-Verification) + RAG:**
 
@@ -119,6 +116,7 @@ python baselines/run_rarr.py \
 python baselines/run_re_ex.py \
     --model "meta-llama/Meta-Llama-3-8B-Instruct" \
     --dataset "longform_bio"
+```
 
 ### 3. Run Ablation Studies
 
@@ -127,29 +125,21 @@ Scripts to analyze the contribution of specific components:
 * **No-RAG (Self-Correction only):**
 ```bash
 python experiments/run_no_rag.py --model "..." --dataset "..."
+```
 
 * **No-Firewall (Skip Entity Consistency):**
 ```bash
 python experiments/run_no_firewall.py --model "..." --dataset "..."
+```
 
 * **High-Density (Atomic) Verification:**
 ```bash
 python experiments/run_dense.py --model "..." --dataset "..."
-
+```
 
 ## 📊 Evaluation
 
-Results are saved as `.jsonl` files in the `results/` directory. You can analyze them using the provided notebooks in `notebooks/` or parse the logs directly.
-
-```bash
-# Example evaluation script usage
-python experiments/evaluate.py --input_file "results/serc/your_result_file.jsonl"
-
+Results are saved as `.jsonl` files in the `results/` directory. You can parse these logs directly to calculate metrics or verify the output.
 
 ##  Contact
-
 For any questions, please contact **Gyumin Kim** via rhzs1208@hufs.ac.kr or open an issue.
-
-```
-
-```
