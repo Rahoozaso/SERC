@@ -217,23 +217,11 @@ def _detect_syndromes_batch(sentence_batches: List[Dict],
     for batch in tqdm(sentence_batches, desc="Phase 1: Detecting (Atomic)"):
         facts = batch["original_facts"]
         if not facts: continue
-
-        # --- [변경 구간 시작] ---
-        # 기존: 문장 단위로 facts 전체를 묶어서 1회 검색
-        # 변경: fact 하나하나마다 개별 검색 수행
         
         for fact in facts:
-            # 1. 개별 Fact를 위한 검색 쿼리 생성
-            # (기존 함수에 리스트 형태로 [fact] 하나만 전달)
             search_q = _prompt_generate_question_for_sentence_group([fact], model_name, config, main_subject)
-            
-            # 2. 개별 Retrieval 수행
             context = retriever.retrieve(search_q)
-            
-            # 3. 개별 Evidence 생성
             evidence = _prompt_get_verification_answer(search_q, model_name, config, context)
-
-            # 4. 검증 (Verdict)
             verdict = prompt_validate_one_fact_against_evidence(fact, evidence, model_name, config)
             
             if verdict == "SUPPORTED":
@@ -241,19 +229,18 @@ def _detect_syndromes_batch(sentence_batches: List[Dict],
             elif verdict == "CONTRADICTED":
                 error_package = {
                     "original_fact": fact,  
-                    "evidence": evidence,   # 이 팩트만을 위한 구체적 Evidence
-                    "context": context,     # 이 팩트만을 위한 구체적 Context
+                    "evidence": evidence,  
+                    "context": context,    
                     "origin_sentence": batch["sentence"] 
                 }
                 syndromes_buffer.append(error_package)
                 logging.info(f"Error Detected: {fact[:30]}...")
-                logging.warning(f"   📌 Fact: {fact}")
-                logging.warning(f"   🔎 Evidence: {evidence[:50]}...")
+                logging.warning(f"    Fact: {fact}")
+                logging.warning(f"    Evidence: {evidence[:50]}...")
             elif verdict == "NOT_FOUND":
                 facts_to_delete.append(fact)
                 logging.warning(f"🗑️ Not Found (Unverified): {fact[:30]}")
-        # --- [변경 구간 끝] ---
-    
+
     return {
         "clean_facts": clean_facts,
         "syndromes_buffer": syndromes_buffer,
@@ -268,8 +255,6 @@ def _correct_syndromes_batch(syndromes_buffer: List[Dict],
     if not syndromes_buffer:
         logging.info(">>> [Step 2] No errors to fix. Skipping correction.")
         return {}
-
-    # 1. 문장별로 오류 그룹화
     error_groups = defaultdict(list)
     for item in syndromes_buffer:
         error_groups[item["origin_sentence"]].append(item)
@@ -280,15 +265,10 @@ def _correct_syndromes_batch(syndromes_buffer: List[Dict],
         all_evidences = [item["evidence"] for item in items]
         combined_evidence = "\n".join(all_evidences)
         
-        # [중요] 이 리스트가 바로 '정답지(Key)' 목록입니다.
         original_facts_list = [item['original_fact'] for item in items]
-
-        # 프롬프트에 넣을 에러 블록 생성
         error_block = ""
         for i, fact in enumerate(original_facts_list, 1):
             error_block += f"{i}. {fact}\n"
-        
-        # 템플릿 포맷팅 (합쳐진 evidence 사용)
         prompt = BP_CORRECTION_TEMPLATE.format(
             context=combined_evidence, 
             error_block=error_block
@@ -432,7 +412,7 @@ def SERC(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, Any]:
     if facts_to_delete:
         logging.info(f"Applying direct deletion for {len(facts_to_delete)} unverified facts.")
         for f in facts_to_delete:
-            fact_correction_map[f] = ""  # 빈 문자열 = 삭제 (Step 5 로직에 의해)
+            fact_correction_map[f] = "" 
 
     history["steps"]["syndromes_detected"] = len(syndromes_buffer)
     history["steps"]["fact_correction_map"] = fact_correction_map
@@ -447,12 +427,12 @@ def SERC(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, Any]:
         old_facts = batch["original_facts"]
         
         updated_facts_list = []
-        has_changes = False  # [최적화] 변경 사항 감지 플래그
+        has_changes = False 
         
         for f in old_facts:
             if f in fact_correction_map:
                 updated_facts_list.append(fact_correction_map[f])
-                has_changes = True  # 변경 발생!
+                has_changes = True 
             else:
                 updated_facts_list.append(f)
         prev_context_str = "\n".join(f"- {f}" for f in accumulated_facts)
@@ -462,7 +442,6 @@ def SERC(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, Any]:
             logging.info(f"Skipped Reconstruction (No Errors): {orig_sent[:30]}...")
             continue
             
-        # 변경된 사실이 있다면? -> 새로 생성 (Generate from Scratch)
         reconstructed = prompt_reconstruct_local_sentence(
             original_sentence=orig_sent,
             updated_facts=updated_facts_list,

@@ -1,53 +1,52 @@
 # configs/config.yaml
 
-
 # --- Default Generation Parameters ---
 default_generation_params:
-  temperature: 0.01        # 기본 온도 값
-  top_p: 0.1              # 기본 top_p 값
-  max_new_tokens: 128     # 생성될 최대 새 토큰 수
-  repetition_penalty: 1.1 # 필요시 주석 해제
+  temperature: 0        # Default temperature value
+  top_p: 0.1            # Default top_p value
+  max_new_tokens: 128   # Maximum new tokens to generate
+  repetition_penalty: 1.1 # Uncomment if needed
 
 # --- Models to Use in Experiments ---
 models:
-  - name: "dummy-model" # 테스트용 가짜 모델
+  - name: "dummy-model" # Dummy model for testing
     provider: "dummy"
 
   - name: "Qwen/Qwen2.5-14B-Instruct" # 14B Group
-    provider: "local_hf" # Hugging Face Transformers로 로드
-    loading_params: # 모델 로딩 시 설정
-      quantization: null        # 양자화 사용 안 함 (null 또는 제거)
-      device_map: "auto"        # GPU 자동 할당
-      dtype: "bfloat16"   # 데이터 타입 지정 (GPU 지원 및 메모리 상황 고려)
+    provider: "local_hf" # Load via Hugging Face Transformers
+    loading_params: # Configuration for model loading
+      quantization: null        # No quantization (null or remove)
+      device_map: "auto"        # Automatic GPU assignment
+      dtype: "bfloat16"   # Specify data type (Consider GPU support and memory)
 
   - name: "Qwen/Qwen3-30B-A3B-Instruct-2507" # 30B Group
     provider: "local_hf"
     loading_params:
-      quantization: "bitsandbytes_8bit" # 예시: 8비트 양자화 사용
+      quantization: "bitsandbytes_8bit" # Example: Use 8-bit quantization
       device_map: "auto"
-      torch_dtype: "bfloat16" # 양자화 사용 시 dtype 자동 설정될 수 있음
-    # generation_params: null # null이면 default_generation_params 사용
+      torch_dtype: "bfloat16" # dtype might be automatically set when using quantization
+    # generation_params: null # If null, use default_generation_params
 
   - name: "meta-llama/Llama-3.1-8B-Instruct" # 8B Group
     provider: "local_hf"
-    requires_auth_token: true # 접근 토큰 필요
+    requires_auth_token: true # Access token required
     loading_params:
       quantization: null
       device_map: "auto"
-      torch_dtype: "bfloat16" # Llama3는 bfloat16 지원
-    # generation_params: null # 기본값 사용
+      torch_dtype: "bfloat16" # Llama3 supports bfloat16
+    # generation_params: null # Use default values
 
 # --- SERC Hyperparameters ---
-default_t_max: 2              # 기본 최대 반복 횟수 (예비 실험 4.4 결과 반영)
-default_max_facts_per_group: 5 # 기본 그룹당 최대 사실 수 (튜닝 대상)
+default_t_max: 2              # Default max iterations (Reflecting preliminary experiment 4.4 results)
+default_max_facts_per_group: 5 # Default max facts per group (Tunable)
 
 # --- Data Paths ---
-# 프로젝트 루트 디렉토리 기준 상대 경로
+# Relative path from project root directory
 data_paths:
   longform_bio: "data/processed/factscore_bio_entities.txt"
-  hallulens_precisewikiqa: "data/hallulens_precisewikiqa_prompts.jsonl"   # 예시 경로
+  hallulens_precisewikiqa: "data/hallulens_precisewikiqa_prompts.jsonl"   # Example path
   truthfulqa: "data/processed/TruthfulQA.csv" 
 
 # --- Result Paths ---
-results_base_dir: "results" # 모델/데이터셋별 결과 저장 기본 디렉토리
+results_base_dir: "results" # Base directory for saving results by model/dataset
 evaluator_model_name: "gemini-3-pro-preview"

@@ -23,8 +23,6 @@ try:
     from src.utils import load_config, save_jsonl, get_timestamp
     from src.data_loader import load_dataset
     from src.model_wrappers import generate
-
-    # [수정됨] prompts.py에서 모든 템플릿을 Import 합니다.
     from src.prompts import (
         BASELINE_PROMPT_TEMPLATE_PN,
         EXTRACT_FACTS_TEMPLATE_PN,
@@ -72,14 +70,11 @@ def prompt_extract_facts_from_sentence(sentence: str, model_name: str, config: d
     prompt = EXTRACT_FACTS_TEMPLATE_PN.format(sentence=sentence, main_subject=main_subject)
     raw = generate(prompt, model_name, config)
     
-    # XML 파싱 시도
     facts = re.findall(r"<fact>(.*?)</fact>", raw, re.DOTALL | re.IGNORECASE)
     
-    # XML 실패 시 하이픈(-) 파싱 백업
     if not facts:
         facts = [line.strip().lstrip("- ").strip() for line in raw.split('\n') if line.strip().startswith('- ')]
     
-    # 그래도 없으면 원문 반환
     if not facts:
         return [sentence] 
     
@@ -105,18 +100,12 @@ def prompt_global_polish(query: str, draft_text: str, model_name: str, config: d
 
 # --- [NEW] Self-Validation Prompt Function ---
 def prompt_self_validate_fact(fact: str, model_name: str, config: dict) -> str:
-    """
-    RAG evidence 없이 모델의 내부 지식(Internal Knowledge)으로 사실 검증
-    Import된 SELF_VALIDATE_TEMPLATE 사용
-    """
     prompt = SELF_VALIDATE_TEMPLATE.format(fact_text=fact)
     raw = generate(prompt, model_name, config, generation_params_override={"temperature": 0.0, "max_new_tokens": 200})
     
     judgment = _extract_xml_tag(raw, "judgment").upper()
     if "CONTRADICTED" in judgment: return "CONTRADICTED"
     if "SUPPORTED" in judgment: return "SUPPORTED"
-    
-    # 판단 불가 시 기본적으로 SUPPORTED 처리 (False Positive 방지)
     return "SUPPORTED"
 
 # =============================================================================
@@ -136,7 +125,6 @@ def _detect_syndromes_self_check(sentence_batches: List[Dict],
         if not facts: continue
         
         for fact in facts:
-            # retrieve 과정 삭제 -> 내부 지식 검증
             verdict = prompt_self_validate_fact(fact, model_name, config)
             
             if verdict == "SUPPORTED":
@@ -145,10 +133,10 @@ def _detect_syndromes_self_check(sentence_batches: List[Dict],
                 error_package = {
                     "original_fact": fact,
                     "origin_sentence": batch["sentence"]
-                    # evidence 없음
+                    # no evidence 
                 }
                 syndromes_buffer.append(error_package)
-                logging.info(f"⚠️ Self-Correction Triggered: {fact[:40]}...")
+                logging.info(f" Self-Correction Triggered: {fact[:40]}...")
 
     return {
         "clean_facts": clean_facts,
@@ -164,7 +152,6 @@ def _correct_syndromes_self_check(syndromes_buffer: List[Dict],
         logging.info(">>> [Phase 2] No errors found by Self-Check. Skipping correction.")
         return {}
 
-    # 문장별로 오류 그룹화
     error_groups = defaultdict(list)
     for item in syndromes_buffer:
         error_groups[item["origin_sentence"]].append(item)
@@ -174,22 +161,18 @@ def _correct_syndromes_self_check(syndromes_buffer: List[Dict],
     for sentence, items in tqdm(error_groups.items(), desc="Correcting (Internal)"):
         original_facts_list = [item['original_fact'] for item in items]
 
-        # 에러 블록 생성
         error_block = ""
         for i, fact in enumerate(original_facts_list, 1):
             error_block += f"{i}. {fact}\n"
         
-        # [변경점] Import된 SELF_BP_CORRECTION_TEMPLATE 사용
         prompt = SELF_BP_CORRECTION_TEMPLATE.format(error_block=error_block)
         
-        # Pre-filling (XML 강제 시작)
         prompt_with_prefill = prompt.strip() + "\n<correction>"
         
         raw_output_fragment = generate(prompt_with_prefill, model_name, config, 
                                        generation_params_override={"max_new_tokens": 256, "temperature": 0.1})
         raw_output = "<correction>" + raw_output_fragment
 
-        # XML 파싱
         correction_blocks = re.findall(r"<correction>(.*?)</correction>", raw_output, re.DOTALL | re.IGNORECASE)
         
         for block in correction_blocks:
@@ -200,7 +183,6 @@ def _correct_syndromes_self_check(syndromes_buffer: List[Dict],
                 llm_orig = orig_match.group(1).strip()
                 clean_corr = fixed_match.group(1).strip()
                 
-                # 매칭을 위한 전처리
                 llm_orig_clean = re.sub(r'^[\d\-\.\)\s]+', '', llm_orig)
                 
                 # Fuzzy Matching
@@ -227,7 +209,7 @@ def SERC_NoRAG(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str,
     # Step 1: Baseline Generation
     baseline = prompt_baseline(query, model_name, config)
     
-    # RAG 기반 Cold Start / Refusal Check 삭제
+    # RAG Based Cold Start / Refusal Check delete
     history["initial_baseline"] = baseline
     main_subject = query 
 
@@ -280,14 +262,11 @@ def SERC_NoRAG(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str,
             else:
                 updated_facts_list.append(f)
         
-        # Local Coherence를 위해 이전 문맥 조금 참조
         prev_context_str = " ".join(local_sentences[-2:]) if local_sentences else ""
         
         if not has_changes:
             local_sentences.append(orig_sent)
             continue
-            
-        # 변경 발생 시 재작성
         reconstructed = prompt_reconstruct_local_sentence(
             original_sentence=orig_sent,
             updated_facts=updated_facts_list,

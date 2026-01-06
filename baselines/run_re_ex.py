@@ -7,25 +7,22 @@ from typing import Dict, Any, List, Optional
 from tqdm import tqdm
 import traceback
 
-# --- [1] 프로젝트 경로 설정 ---
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(PROJECT_ROOT)
 sys.path.append(os.path.join(PROJECT_ROOT, "src")) 
 
 try:
     from src.model_wrappers import generate
-    from src import prompts
+    from src.prompts import (BASELINE_PROMPT_TEMPLATE_PN)
     from src.utils import load_config, save_jsonl, get_timestamp, token_tracker
     from src.data_loader import load_dataset
     from src.rag_retriever import RAGRetriever
-    from src.main_serc import prompt_baseline 
 
 except ImportError:
     logging.error("--- ImportError Traceback ---")
     logging.error(traceback.format_exc())
     sys.exit(1)
 
-# 로깅 설정
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -64,35 +61,38 @@ Initial Response: {initial_response}
 
 Revised Response:"""
 
-# --- [3] RE-EX 헬퍼 함수 ---
+# --- [3] RE-EX Helper Functions ---
+def prompt_baseline(query: str, model_name: str, config: dict) -> str:
+    prompt = BASELINE_PROMPT_TEMPLATE_PN.format(query=query)
+    return generate(prompt, model_name, config)
 
 def _parse_re_ex_questions(text: str) -> List[str]:
-    """RE-EX Step 1에서 생성된 질문 목록을 파싱합니다."""
+    """Parses the list of questions generated in RE-EX Step 1."""
     lines = text.strip().splitlines()
     questions = []
     for line in lines:
-        # 숫자 리스트 제거 (1. 질문 -> 질문) 및 물음표 확인
+        # Remove numbered list (1. question -> question) and check for question mark
         cleaned = re.sub(r"^\s*(\d+\.|Q\d:|Sub-question \d+:)\s*", "", line).strip()
         if cleaned and '?' in cleaned:
             questions.append(cleaned)
     return questions
 
 def _format_evidence(qa_list: List[Dict[str, str]]) -> str:
-    """검색된 증거(Evidence)를 프롬프트 포맷으로 변환합니다."""
+    """Formats retrieved evidence into prompt format."""
     if not qa_list:
         return "No evidence found."
     
     formatted_str = ""
     for i, item in enumerate(qa_list, 1):
-        # RAGRetriever가 반환한 검색 결과(Context)를 Answer로 사용
+        # Use retrieved context from RAGRetriever as Answer
         formatted_str += f"[Sub-question {i}]: {item['question']}\n[Sub-answer {i}]: {item['evidence']}\n\n"
     return formatted_str.strip()
 
 def _clean_re_ex_output(raw_response: str) -> str:
-    """최종 답변 정제 (CoVe 정제 로직 재사용)"""
+    """Final answer cleaning (Reusing CoVe cleaning logic)"""
     if not raw_response: return ""
     
-    # "Revised Response:" 이후의 텍스트만 추출 시도
+    # Try extracting only text after "Revised Response:"
     split_patterns = [r"Revised Response:", r"\[Revised Response\]", r"Output:"]
     for pattern in split_patterns:
         match = re.search(pattern, raw_response, re.IGNORECASE)
@@ -100,16 +100,16 @@ def _clean_re_ex_output(raw_response: str) -> str:
             raw_response = raw_response[match.end():].strip()
             break
             
-    # 기존 정제 로직 (불필요한 태그 제거)
+    # Existing cleaning logic (remove unnecessary tags)
     clean_text = re.sub(r'\(Note:.*?\)', '', raw_response, flags=re.IGNORECASE)
     clean_text = clean_text.strip().strip('"').strip("'")
     return clean_text
 
-# --- [4] RE-EX 메인 실행 함수 ---
+# --- [4] RE-EX Main Execution Function ---
 
 def run_re_ex(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, Any]:
     """
-    RE-EX (Revising Explanations) 3단계 파이프라인 실행
+    Executes RE-EX (Revising Explanations) 3-Step Pipeline
     Step 1: Generate Questions & Retrieve Evidence
     Step 2: Explain Factual Errors
     Step 3: Revise Response
@@ -119,21 +119,21 @@ def run_re_ex(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, 
     try:
         retriever = RAGRetriever(config=config)
     except Exception as e:
-        logging.error(f"RAG Retriever 초기화 실패: {e}", exc_info=True)
+        logging.error(f"RAG Retriever Init Failed: {e}", exc_info=True)
         history['error'] = f"Retriever Init Error: {e}"
         return history
 
     try:
-        # --- 0단계: 초기 답변 생성 (Baseline) ---
-        logging.info("  [RE-EX 0/3] 초기 답변 생성 중...")
+        # --- Stage 0: Generate Initial Answer (Baseline) ---
+        logging.info("  [RE-EX 0/3] Generating initial answer...")
         initial_response = prompt_baseline(query, model_name, config)
         history['steps']['0_initial_response'] = initial_response
         logging.info(f"    Baseline Length: {len(initial_response)} chars")
 
-        # --- 1단계: 질문 생성 및 증거 검색 (Generate & Retrieve) ---
-        logging.info("  [RE-EX 1/3] 질문 생성 및 증거 검색 중...")
+        # --- Stage 1: Generate Questions & Retrieve Evidence ---
+        logging.info("  [RE-EX 1/3] Generating questions & retrieving evidence...")
         
-        # 1-1. 질문 생성 (Batch)
+        # 1-1. Generate Questions (Batch)
         step1_prompt = RE_EX_STEP1_TEMPLATE.format(query=query, initial_response=initial_response)
         questions_raw = generate(step1_prompt, model_name, config)
         questions = _parse_re_ex_questions(questions_raw)
@@ -142,17 +142,17 @@ def run_re_ex(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, 
         history['steps']['1_parsed_questions'] = questions
         logging.info(f"    Generated {len(questions)} sub-questions.")
 
-        # 1-2. 증거 검색 (Retrieval)
+        # 1-2. Retrieve Evidence
         evidence_list = []
         for q in questions:
-            # RAGRetriever를 사용하여 문서 검색 (검색된 문맥 자체를 Answer로 간주)
+            # Retrieve documents using RAGRetriever (Retrieved context itself is treated as Answer)
             retrieved_docs = retriever.retrieve(q)
             evidence_list.append({'question': q, 'evidence': retrieved_docs})
         
         history['steps']['1_evidence_list'] = evidence_list
 
-        # --- 2단계: 오류 설명 (Factual Error Explanation) ---
-        logging.info("  [RE-EX 2/3] 오류 설명 생성 중...")
+        # --- Stage 2: Factual Error Explanation ---
+        logging.info("  [RE-EX 2/3] Generating factual error explanation...")
         evidence_str = _format_evidence(evidence_list)
         
         step2_prompt = RE_EX_STEP2_TEMPLATE.format(
@@ -164,13 +164,13 @@ def run_re_ex(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, 
         history['steps']['2_explanation'] = explanation
         logging.info(f"    Explanation: {explanation[:100]}...")
 
-        # --- 3단계: 최종 수정 (Revision) ---
+        # --- Stage 3: Final Revision ---
         if "None" in explanation or "no factual errors" in explanation.lower():
-            logging.info("    오류 없음 감지 -> 원본 유지")
+            logging.info("    No errors detected -> Keeping original response")
             final_output = initial_response
             history['steps']['3_revision'] = "Skipped (No errors)"
         else:
-            logging.info("  [RE-EX 3/3] 최종 답변 수정 중...")
+            logging.info("  [RE-EX 3/3] Revising final response...")
             step3_prompt = RE_EX_STEP3_TEMPLATE.format(
                 explanation=explanation,
                 query=query,
@@ -184,13 +184,13 @@ def run_re_ex(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, 
         logging.info(f"    RE-EX Final Output: {final_output[:100]}...")
 
     except Exception as e:
-        logging.error(f"RE-EX 실행 중 오류 발생: {e}", exc_info=True)
+        logging.error(f"Error during RE-EX execution: {e}", exc_info=True)
         history['error'] = str(e)
         history['final_output'] = f"Error: {e}"
 
     return history
 
-# --- 단일 항목 처리 래퍼 ---
+# --- Single Item Processing Wrapper ---
 def run_single_item_wrapper(item: Dict[str, Any], model_name: str, config: Dict[str, Any]) -> Dict[str, Any]:
     token_tracker.reset()
     try:
@@ -208,7 +208,7 @@ def run_single_item_wrapper(item: Dict[str, Any], model_name: str, config: Dict[
             'token_usage': usage
         }
     except Exception as e:
-        logger.error(f"'{query}' 처리 중 오류 발생 (RE-EX): {e}", exc_info=False)
+        logger.error(f"Error processing '{query}' (RE-EX): {e}", exc_info=False)
         method_result = {
             "error": f"Exception: {e}", 
             "status": "error",
@@ -221,7 +221,7 @@ def run_single_item_wrapper(item: Dict[str, Any], model_name: str, config: Dict[
     }
     return output_item
 
-# --- 메인 함수 ---
+# --- Main Function ---
 def main():
     parser = argparse.ArgumentParser(description="Run RE-EX (Revising Explanations) Experiment.")
     
@@ -240,23 +240,23 @@ def main():
     try:
         config = load_config(args.config)
     except Exception as e:
-        logger.error(f"Config 로드 실패: {e}")
+        logger.error(f"Config load failed: {e}")
         return
         
-    logging.info(f"--- RE-EX 실험 시작 ---")
+    logging.info(f"--- RE-EX Experiment Start ---")
     logging.info(f"Dataset: {args.dataset} | Model: {args.model}")
 
-    # 데이터셋 로드
+    # Load Dataset
     dataset_path = os.path.join(PROJECT_ROOT, config['data_paths'][args.dataset])
     data = load_dataset(args.dataset, dataset_path)
     
     if not data: return
 
-    # 슬라이싱
+    # Slicing
     end_idx = args.end if args.end is not None else len(data)
     data = data[args.start : end_idx]
 
-    # 경로 설정
+    # Path Setup
     timestamp = get_timestamp()
     results_dir = os.path.join(PROJECT_ROOT, args.output_dir, args.model.replace('/', '_'), args.dataset)
     os.makedirs(results_dir, exist_ok=True)
@@ -273,7 +273,7 @@ def main():
             save_jsonl(results, output_path)
     
     save_jsonl(results, output_path)
-    logging.info(f"실험 완료. 결과 저장: {output_path}")
+    logging.info(f"Experiment Complete. Saved to: {output_path}")
 
 if __name__ == "__main__":
     main()

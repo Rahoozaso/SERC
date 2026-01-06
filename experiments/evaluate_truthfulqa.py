@@ -19,16 +19,16 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 def extract_responses(item: Dict[str, Any]) -> Tuple[str, str]:
-    """로그 포맷에 따라 Baseline과 Final Output 텍스트 추출"""
+    """Extract Baseline and Final Output text based on log format."""
     method_result = item.get("method_result", {})
     baseline_text = ""
     final_text = ""
 
-    if "cove_result" in method_result: # CoVe 구조
+    if "cove_result" in method_result: # CoVe Structure
         cove_res = method_result["cove_result"]
         final_text = cove_res.get("final_output", "")
         baseline_text = cove_res.get("steps", {}).get("1_initial_baseline", "")
-    elif "history" in method_result: # 일반 구조
+    elif "history" in method_result: # General Structure
         history = method_result.get("history", {})
         baseline_text = history.get("initial_baseline") or history.get("regenerated_baseline", "")
         final_text = method_result.get("final_output", "")
@@ -38,10 +38,10 @@ def extract_responses(item: Dict[str, Any]) -> Tuple[str, str]:
     return baseline_text, final_text
 
 def evaluate_truthfulqa(results_data: List[Dict[str, Any]], config: Dict[str, Any], target: str = "all", output_path: str = None) -> Dict[str, Any]:
-    logger.info(f"TruthfulQA 평가 시작 (Target: {target.upper()})...")
+    logger.info(f"TruthfulQA evaluation started (Target: {target.upper()})...")
     evaluator_model = config.get('evaluator_model_name')
     
-    # --- 평가 결과를 통째로 반환하는 함수 ---
+    # --- Function to return the entire evaluation result ---
     def evaluate_single_response(query, correct, incorrect, pred_text, label="Response"):
         if not pred_text:
             return {"score": 0, "reasoning": "No response", "is_misconception": False}
@@ -51,20 +51,20 @@ def evaluate_truthfulqa(results_data: List[Dict[str, Any]], config: Dict[str, An
                 query=query, correct_answers_str=correct, incorrect_answers_str=incorrect, prediction=pred_text
             )
             
-            # Gemini 호출 (evaluate_generate는 내부적으로 Retry 로직 포함됨)
+            # Call Gemini (evaluate_generate internally includes Retry logic)
             judgment = evaluate_generate(prompt, evaluator_model, config, {"temperature": 0.0, "max_new_tokens": 8192, "response_mime_type": "application/json"})
 
-            # JSON 파싱
+            # JSON Parsing
             json_match = re.search(r'```json\s*(\{.*?\})\s*```', judgment, re.DOTALL) or re.search(r'\{.*\}', judgment, re.DOTALL)
             json_str = json_match.group(1) if json_match and json_match.lastindex else (json_match.group(0) if json_match else judgment)
             
             return json.loads(json_str)
 
         except Exception as e:
-            logger.warning(f"[{label}] 평가 에러: {e}")
+            logger.warning(f"[{label}] Evaluation Error: {e}")
             return {"score": 0, "reasoning": f"Error: {str(e)}", "is_misconception": False}
 
-    # --- 통계 및 로그 저장소 ---
+    # --- Statistics and Log Storage ---
     stats = {
         "base_scores": [], "final_scores": [],
         "base_truthful": 0, "final_truthful": 0,
@@ -89,7 +89,7 @@ def evaluate_truthfulqa(results_data: List[Dict[str, Any]], config: Dict[str, An
             "final": {}     
         }
 
-        # (A) Baseline 평가
+        # (A) Baseline Evaluation
         b_res = {"score": 0}
         if target in ["baseline", "all"]:
             b_res = evaluate_single_response(query, correct, incorrect, base_txt, "Baseline")
@@ -101,7 +101,7 @@ def evaluate_truthfulqa(results_data: List[Dict[str, Any]], config: Dict[str, An
                 "evaluation": b_res 
             }
 
-        # (B) Final 평가
+        # (B) Final Evaluation
         f_res = {"score": 0}
         if target in ["final", "all"]:
             f_res = evaluate_single_response(query, correct, incorrect, final_txt, "Final")
@@ -113,7 +113,7 @@ def evaluate_truthfulqa(results_data: List[Dict[str, Any]], config: Dict[str, An
                 "evaluation": f_res 
             }
 
-        # (C) 비교 통계
+        # (C) Comparison Statistics
         if target == "all":
             log_entry["score_delta"] = f_res["score"] - b_res["score"]
             if f_res["score"] > b_res["score"]: stats["improved"] += 1
@@ -122,17 +122,17 @@ def evaluate_truthfulqa(results_data: List[Dict[str, Any]], config: Dict[str, An
         detailed_logs.append(log_entry)
         stats["count"] += 1
 
-    # --- 파일 저장 ---
+    # --- File Saving ---
     if output_path and detailed_logs:
         try:
             with open(output_path, 'w', encoding='utf-8') as f:
                 for entry in detailed_logs:
                     f.write(json.dumps(entry, ensure_ascii=False) + '\n')
-            logger.info(f"상세 결과 저장 완료: {output_path}")
+            logger.info(f"Detailed results saved successfully: {output_path}")
         except Exception as e:
-            logger.error(f"파일 저장 실패: {e}")
+            logger.error(f"File save failed: {e}")
 
-    # --- 요약 리턴 ---
+    # --- Return Summary ---
     cnt = stats["count"]
     if cnt == 0: return {"error": "No data"}
     
@@ -157,27 +157,17 @@ def main():
     parser.add_argument("--output_file", default="eval_results", help="Base filename prefix (e.g., eval_results)")
     args = parser.parse_args()
 
-    # ---------------------------------------------------------
-    # [경로 설정 로직 수정]
-    # 입력 파일이 있는 디렉토리에 결과 파일을 저장합니다.
-    # ---------------------------------------------------------
-    
-    # 1. 입력 파일의 디렉토리 경로 추출
+
     input_dir = os.path.dirname(args.results_file)
     
-    # 2. 입력 파일명(확장자 제외) 추출
     input_basename = os.path.basename(args.results_file)
     input_name_no_ext = os.path.splitext(input_basename)[0]
-    
-    # 3. 출력 파일명 생성 (접두사 + 입력파일명 + 타임스탬프)
-    # output_file 인자가 경로를 포함하더라도 파일명 부분만 사용 ('eval_results' 등)
     output_prefix = os.path.basename(args.output_file)
     output_prefix_no_ext = os.path.splitext(output_prefix)[0]
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     final_filename = f"{output_prefix_no_ext}_{input_name_no_ext}_{timestamp}.jsonl"
     
-    # 4. 최종 경로 합치기 (입력 디렉토리 + 생성된 파일명)
     final_output_path = os.path.join(input_dir, final_filename)
 
     config = load_config(args.config)
@@ -187,7 +177,7 @@ def main():
     except: pass
     
     if not os.path.exists(args.results_file):
-        logger.error(f"파일 없음: {args.results_file}")
+        logger.error(f"File not found: {args.results_file}")
         return
 
     results_data = load_jsonl(args.results_file)

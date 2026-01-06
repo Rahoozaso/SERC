@@ -39,7 +39,7 @@ try:
         BASELINE_PROMPT_TEMPLATE_RAG_FIRST,
         RECONSTRUCT_LOCAL_SENTENCE_TEMPLATE,
         GLOBAL_POLISH_TEMPLATE,
-        BP_CORRECTION_TEMPLATE  # [확인] src/prompts.py에 정의되어 있어야 함
+        BP_CORRECTION_TEMPLATE
     )
 except ImportError as e:
     logging.error(f"ImportError: {e}. Check your src/ folder and PYTHONPATH.")
@@ -125,35 +125,26 @@ def prompt_extract_facts_from_sentence(sentence: str, model_name: str, config: d
     prompt = EXTRACT_FACTS_TEMPLATE_PN.format(sentence=sentence, main_subject=main_subject)
     raw = generate(prompt, model_name, config)
 
-    # 1. 불필요한 종료 태그 이후 내용 제거 (Prompt Leakage 방지)
     stop_markers = ["[/INSTRUCTION]", "[/INSTURCTION]", "[/INST]", "[RESPONSE]"]
     for marker in stop_markers:
         if marker in raw:
             raw = raw.split(marker)[0]
 
-    # 2. <facts> 블록 범위 확인 및 로깅
     facts_block_match = re.search(r"<facts>(.*?)</facts>", raw, re.DOTALL | re.IGNORECASE)
     
     if facts_block_match:
-        # 1순위: <facts> 블록 안에서 검색
         content_to_search = facts_block_match.group(1)
     else:
-        # 2순위: 전체 텍스트에서 검색 (Fallback)
         content_to_search = raw
-    # 3. XML 태그 추출
     facts = re.findall(r"<fact>(.*?)</fact>", content_to_search, re.DOTALL | re.IGNORECASE)
-    
-    # 4. XML 실패 시 백업 파싱 (하이픈 - )
     if not facts:
         facts = [line.strip().lstrip("- ").strip() for line in content_to_search.split('\n') if line.strip().startswith('- ')]
         if facts:
             logging.warning("  [Extract Method] SUCCESS: Used hyphen fallback (XML failed).")
     
-    # 5. 공백 제거 및 정리
     if facts:
         facts = [f.strip() for f in facts if f.strip()]
 
-    # 6. [최종 방어] 팩트가 추출되지 않으면, 원본 문장 전체를 하나의 팩트로 반환
     if not facts:
         logging.warning(f"  [CRITICAL FAIL] Fact extraction failed completely. Using sentence as fact.")
         return [sentence] 
@@ -186,7 +177,6 @@ def prompt_generate_correct_fact(error_fact: str, model_name: str, config: dict,
 
 def prompt_reconstruct_local_sentence(original_sentence: str, updated_facts: List[str],
                                       query: str, model_name: str, config: dict, previous_context: str = "") -> str:
-    # [핵심] XML 방식: 원문은 무시하고 팩트 리스트로 새로 짓기
     fact_list_str = "\n".join(f"- {f}" for f in updated_facts)
     prompt = RECONSTRUCT_LOCAL_SENTENCE_TEMPLATE.format(
         previous_context=previous_context,
@@ -195,7 +185,6 @@ def prompt_reconstruct_local_sentence(original_sentence: str, updated_facts: Lis
     )
     raw = generate(prompt, model_name, config)
     modified_raw = f"<generated_sentence>{raw}"
-    # XML 태그 추출
     return _extract_xml_tag(modified_raw, "generated_sentence") or _clean_model_output(modified_raw)
 
 def prompt_global_polish(query: str, draft_text: str, model_name: str, config: dict) -> str:
@@ -240,8 +229,8 @@ def _detect_syndromes_batch(sentence_batches: List[Dict],
                 }
                 syndromes_buffer.append(error_package)
                 logging.info(f"Error Detected: {fact[:30]}...")
-                logging.warning(f"   📌 Fact: {fact}")
-                logging.warning(f"   🔗 Origin: {batch['sentence'][:50]}...")
+                logging.warning(f"    Fact: {fact}")
+                logging.warning(f"    Origin: {batch['sentence'][:50]}...")
             elif verdict == "NOT_FOUND":
                 facts_to_delete.append(fact)
                 logging.warning(f"🗑️ Not Found (Unverified): {fact[:30]}")
@@ -261,7 +250,6 @@ def _correct_syndromes_batch(syndromes_buffer: List[Dict],
         logging.info(">>> [Step 2] No errors to fix. Skipping correction.")
         return {}
 
-    # 1. 문장별로 오류 그룹화
     error_groups = defaultdict(list)
     for item in syndromes_buffer:
         error_groups[item["origin_sentence"]].append(item)
@@ -269,43 +257,27 @@ def _correct_syndromes_batch(syndromes_buffer: List[Dict],
     logging.info(f">>> [Step 2] BP Correction Started ({len(error_groups)} sentence groups)")
 
     for sentence, items in tqdm(error_groups.items(), desc="Phase 2: Correcting"):
-        # [변경 포인트 1] Raw Context 대신 정제된 검증 답안(Evidence) 사용
-        # items[0]["context"] -> items[0]["evidence"]
         evidence_context = items[0]["evidence"] 
         
-        # [중요] 이 리스트가 바로 '정답지(Key)' 목록입니다.
         original_facts_list = [item['original_fact'] for item in items]
-
-        # 프롬프트에 넣을 에러 블록 생성
         error_block = ""
         for i, fact in enumerate(original_facts_list, 1):
             error_block += f"{i}. {fact}\n"
         
-        # 템플릿 포맷팅 (context 자리에 evidence를 넣습니다)
         prompt = BP_CORRECTION_TEMPLATE.format(
-            context=evidence_context,  # <--- 여기가 핵심 변경 사항
+            context=evidence_context,
             error_block=error_block
         )
         
-        # [변경 포인트 2] Pre-filling (앵무새 방지 강제 주입)
-        # 프롬프트 끝에 시작 태그를 미리 붙여서 보냅니다.
-        prompt_with_prefill = prompt.strip() + "\n<correction>"
 
-        # 생성 호출
-        # stop_strings를 사용하여 사족을 자릅니다 (transformers pipeline 사용 시)
-        # 여기서는 raw 텍스트 후처리에 의존하는 방식 유지
+        prompt_with_prefill = prompt.strip() + "\n<correction>"
         raw_output_fragment = generate(prompt_with_prefill, model_name, config, 
                                        generation_params_override={
                                            "max_new_tokens": 256, 
                                            "temperature": 0.1,
-                                           # 지원되는 경우 stop_strings 추가 권장
-                                           # "stop_strings": ["</correction>\n\n", "```"] 
                                        })
         
-        # 모델은 <correction> 뒷부분만 뱉으므로, 앞부분을 다시 붙여서 완성
         raw_output = "<correction>" + raw_output_fragment
-
-        # XML 파싱  
         correction_blocks = re.findall(r"<correction>(.*?)</correction>", raw_output, re.DOTALL | re.IGNORECASE)
         
         for block in correction_blocks:
@@ -316,25 +288,21 @@ def _correct_syndromes_batch(syndromes_buffer: List[Dict],
                 llm_orig = orig_match.group(1).strip()
                 clean_corr = fixed_match.group(1).strip()
                 
-                # 원본 매칭을 위한 전처리 (숫자, 기호 제거)
                 llm_orig_clean = re.sub(r'^[\d\-\.\)\s]+', '', llm_orig)
                 
-                # [변경 포인트 3] Fuzzy Matching 도입 (유사도 기반 매칭)
-                matches = get_close_matches(llm_orig_clean, original_facts_list, n=1, cutoff=0.7) # cutoff 0.6 -> 0.7 상향 조정 권장
+                matches = get_close_matches(llm_orig_clean, original_facts_list, n=1, cutoff=0.7) 
                 
                 if matches:
-                    true_key = matches[0]  # 찾은 '진짜 키'
+                    true_key = matches[0]
                     
-                    # 맵에 저장
                     fact_correction_map[true_key] = clean_corr
                     
                     if clean_corr:
-                        logging.info(f"🔗 Matched: '{llm_orig_clean[:15]}...' -> Key: '{true_key[:15]}...'")
+                        logging.info(f" Matched: '{llm_orig_clean[:15]}...' -> Key: '{true_key[:15]}...'")
                     else:
-                        logging.info(f"🗑️ Matched (Delete): '{true_key[:15]}...'")
+                        logging.info(f" Matched (Delete): '{true_key[:15]}...'")
                 else:
-                    # 매칭 실패 시 로그
-                    logging.warning(f"⚠️ Match Failed: LLM said '{llm_orig_clean}' but not found in list.")
+                    logging.warning(f"Match Failed: LLM said '{llm_orig_clean}' but not found in list.")
             
     return fact_correction_map
 
@@ -438,7 +406,7 @@ def SERC(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, Any]:
     if facts_to_delete:
         logging.info(f"Applying direct deletion for {len(facts_to_delete)} unverified facts.")
         for f in facts_to_delete:
-            fact_correction_map[f] = ""  # 빈 문자열 = 삭제 (Step 5 로직에 의해)
+            fact_correction_map[f] = "" 
 
     history["steps"]["syndromes_detected"] = len(syndromes_buffer)
     history["steps"]["fact_correction_map"] = fact_correction_map
@@ -453,12 +421,12 @@ def SERC(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, Any]:
         old_facts = batch["original_facts"]
         
         updated_facts_list = []
-        has_changes = False  # [최적화] 변경 사항 감지 플래그
+        has_changes = False
         
         for f in old_facts:
             if f in fact_correction_map:
                 updated_facts_list.append(fact_correction_map[f])
-                has_changes = True  # 변경 발생!
+                has_changes = True 
             else:
                 updated_facts_list.append(f)
         prev_context_str = "\n".join(f"- {f}" for f in accumulated_facts)
@@ -468,7 +436,6 @@ def SERC(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, Any]:
             logging.info(f"Skipped Reconstruction (No Errors): {orig_sent[:30]}...")
             continue
             
-        # 변경된 사실이 있다면? -> 새로 생성 (Generate from Scratch)
         reconstructed = prompt_reconstruct_local_sentence(
             original_sentence=orig_sent,
             updated_facts=updated_facts_list,
@@ -537,7 +504,7 @@ def run_single_item(item: Dict[str, Any], model_name: str, config: Dict[str, Any
             "method_result": {
                 "error": str(e), 
                 "status": "error",
-                "token_usage": token_tracker.get_usage() # 에러 나기 전까지 쓴 거라도 기록
+                "token_usage": token_tracker.get_usage()
             }
         }
     finally:

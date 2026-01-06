@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Dict, Any, List
 
 def load_config(config_path: str = "config.yaml") -> Dict[str, Any]:
-    """YAML 설정 파일을 로드합니다."""
+    """Loads a YAML configuration file."""
     try:
         with open(config_path, 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f)
@@ -20,7 +20,7 @@ def load_config(config_path: str = "config.yaml") -> Dict[str, Any]:
         raise
 
 def load_jsonl(file_path: str) -> List[Dict[str, Any]]:
-    """JSONL (JSON Lines) 파일을 로드하여 딕셔너리 리스트로 반환합니다."""
+    """Loads a JSONL (JSON Lines) file and returns a list of dictionaries."""
     data = []
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
@@ -39,36 +39,35 @@ def load_jsonl(file_path: str) -> List[Dict[str, Any]]:
     return data
 
 def save_jsonl(data: List[Dict[str, Any]], file_path: str):
-    """딕셔너리 리스트를 JSONL 파일로 저장합니다."""
-    print(f"--- Debug: Attempting to save to: '{file_path}'") # <--- 디버깅 1: 전달된 경로 확인
+    """Saves a list of dictionaries to a JSONL file."""
+    print(f"--- Debug: Attempting to save to: '{file_path}'") # <--- Debug 1: Check passed path
     try:
-        # 파일 경로에서 디렉토리 이름 추출
+        # Extract directory name from file path
         dir_name = os.path.dirname(file_path)
-        print(f"--- Debug: Calculated directory: '{dir_name}'") # <--- 디버깅 2: 추출된 디렉토리 확인
+        print(f"--- Debug: Calculated directory: '{dir_name}'") # <--- Debug 2: Check extracted directory
 
-        # 디렉토리 이름이 비어있지 않은 경우에만 디렉토리 생성 시도
+        # Attempt to create directory only if directory name is not empty
         if dir_name:
-            print(f"--- Debug: Ensuring directory exists: '{dir_name}'") # <--- 디버깅 3
+            print(f"--- Debug: Ensuring directory exists: '{dir_name}'") # <--- Debug 3
             os.makedirs(dir_name, exist_ok=True)
         else:
-            # 디렉토리 이름이 비어 있다면, 현재 작업 디렉토리를 의미함
-            print(f"--- Debug: Directory name is empty, attempting to save in current working directory.") # <--- 디버깅 4
+            # If directory name is empty, it means current working directory
+            print(f"--- Debug: Directory name is empty, attempting to save in current working directory.") # <--- Debug 4
 
-        # 파일 열기 및 쓰기
-        print(f"--- Debug: Opening file for writing: '{file_path}'") # <--- 디버깅 5
+        # Open file and write
+        print(f"--- Debug: Opening file for writing: '{file_path}'") # <--- Debug 5
         with open(file_path, 'w', encoding='utf-8') as f:
             for item in data:
-                # ensure_ascii=False는 한국어 등을 올바르게 저장하기 위함
+                # ensure_ascii=False ensures correct saving of non-ASCII characters (e.g., Korean)
                 f.write(json.dumps(item, ensure_ascii=False) + '\n')
         print(f"Saved {len(data)} records to {file_path}")
-    except Exception as e: # 예상치 못한 다른 에러
+    except Exception as e: # Catch unexpected errors
          print(f"An unexpected error occurred saving to {file_path}: {e} ")
 
 def get_timestamp() -> str:
-    """현재 시간을 'YYYYMMDD_HHMMSS' 형식의 문자열로 반환합니다."""
+    """Returns the current time as a string in 'YYYYMMDD_HHMMSS' format."""
     return datetime.now().strftime("%Y%m%d_%H%M%S")
 
-# --- Example Usage (for testing this file directly) ---
 # --- Example Usage (for testing this file directly) ---
 if __name__ == '__main__':
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -89,8 +88,8 @@ if __name__ == '__main__':
     # --- Test JSONL Saving & Loading ---
     print("\n--- Testing JSONL Save/Load ---")
     test_data = [
-        {'id': 1, 'text': '첫 번째 줄입니다.', 'valid': True},
-        {'id': 2, 'text': '두 번째 줄, 한국어 포함.', 'value': 12.3},
+        {'id': 1, 'text': 'This is the first line.', 'valid': True},
+        {'id': 2, 'text': 'Second line, including Korean.', 'value': 12.3},
         {'id': 3, 'nested': {'key': 'value'}}
     ]
     test_file_path = os.path.join(script_dir, 'temp_test_output.jsonl')
@@ -127,7 +126,7 @@ if __name__ == '__main__':
     
 class TokenUsageTracker:
     """
-    전역적으로 토큰 사용량을 추적하는 싱글톤 클래스입니다.
+    A singleton class to track token usage globally.
     """
     _instance = None
     
@@ -145,8 +144,8 @@ class TokenUsageTracker:
         self.output_tokens = 0
 
     def add(self, input_text: str, output_text: str):
-        # Llama-3 토크나이저가 없어도 대략적인 근사치(1 token ≈ 4 chars)로 계산
-        # (정확한 계산을 원하면 tokenizer.encode(text) len을 써야 하지만, 비교 실험용으로는 근사치도 허용됨)
+        # Calculate approximate token count (1 token ≈ 4 chars) even without Llama-3 tokenizer
+        # (Use tokenizer.encode(text) len for accuracy, but approximation is acceptable for comparative experiments)
         in_cnt = len(input_text) / 4
         out_cnt = len(output_text) / 4
         
@@ -161,5 +160,5 @@ class TokenUsageTracker:
             "total_tokens": self.total_tokens
         }
 
-# 전역 객체 생성
+# Create global object
 token_tracker = TokenUsageTracker()

@@ -218,16 +218,9 @@ def _detect_syndromes_batch(sentence_batches: List[Dict],
         if not facts: continue
 
         for fact in facts:
-            # 1. 개별 Fact를 위한 검색 쿼리 생성
             search_q = _prompt_generate_question_for_sentence_group([fact], model_name, config, main_subject)
-            
-            # 2. 개별 Retrieval 수행
             context = retriever.retrieve(search_q)
-            
-            # 3. 개별 Evidence 생성
             evidence = _prompt_get_verification_answer(search_q, model_name, config, context)
-
-            # 4. 검증 (Verdict)
             verdict = prompt_validate_one_fact_against_evidence(fact, evidence, model_name, config)
             
             if verdict == "SUPPORTED":
@@ -235,15 +228,15 @@ def _detect_syndromes_batch(sentence_batches: List[Dict],
             elif verdict == "CONTRADICTED":
                 error_package = {
                     "original_fact": fact,  
-                    "evidence": evidence,   # 개별 증거
-                    "context": context,     # 개별 컨텍스트
+                    "evidence": evidence,   
+                    "context": context,     
                     "origin_sentence": batch["sentence"] 
                 }
                 syndromes_buffer.append(error_package)
                 logging.info(f"Error Detected: {fact[:30]}...")
             elif verdict == "NOT_FOUND":
                 facts_to_delete.append(fact)
-                logging.warning(f"🗑️ Not Found: {fact[:30]}")
+                logging.warning(f"Not Found: {fact[:30]}")
     
     return {
         "clean_facts": clean_facts,
@@ -260,7 +253,6 @@ def _correct_syndromes_batch(syndromes_buffer: List[Dict],
         logging.info(">>> [Step 2] No errors to fix.")
         return {}
 
-    # 1. 문장별로 오류 그룹화
     error_groups = defaultdict(list)
     for item in syndromes_buffer:
         error_groups[item["origin_sentence"]].append(item)
@@ -268,13 +260,11 @@ def _correct_syndromes_batch(syndromes_buffer: List[Dict],
     logging.info(f">>> [Step 2] BP Correction Started ({len(error_groups)} sentence groups)")
 
     for sentence, items in tqdm(error_groups.items(), desc="Phase 2: Correcting"):
-        # 여러 증거(Evidence) 통합
         all_evidences = [item["evidence"] for item in items]
         combined_evidence = "\n".join(all_evidences)
         
         original_facts_list = [item['original_fact'] for item in items]
 
-        # 에러 블록 생성
         error_block = ""
         for i, fact in enumerate(original_facts_list, 1):
             error_block += f"{i}. {fact}\n"
@@ -340,10 +330,7 @@ def SERC(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, Any]:
     
     history["initial_baseline"] = baseline
 
-    # --- [Step 1.5] Entity Firewall Removed ---
-    # 복잡한 RAG 비교/리셋 로직은 제거하고, 
-    # Fact Extraction을 위해 주체(Subject)만 간단히 추출합니다.
-    
+    # --- [Step 1.5] Entity Firewall Removed ---    
     logging.info("--- [Modified] Skipping Firewall Check ---")
     query_entity = prompt_extract_entity_desc(query, model_name, config, is_query=True)
     main_subject = query_entity if query_entity else query

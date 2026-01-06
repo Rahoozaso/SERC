@@ -6,7 +6,7 @@ from typing import List, Dict, Any
 import pandas as pd
 
 try:
-    # 일반적인 실행 시 (예: experiments/run_experiment.py에서 호출)
+    # When running normally (e.g., called from experiments/run_experiment.py)
     from .utils import load_jsonl, save_jsonl
 except ImportError:
     import sys
@@ -15,17 +15,17 @@ except ImportError:
         sys.path.append(PROJECT_ROOT)
     from src.utils import load_jsonl, save_jsonl
 
-# 로깅 설정
+# Logging configuration
 logger = logging.getLogger(__name__)
-# 기본 핸들러 설정 (스크립트 직접 실행 시 로그 보이도록)
+# Default handler setup (to show logs when running script directly)
 if not logger.hasHandlers():
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(module)s - %(message)s')
 
 
-# --- 벤치마크별 로더 함수 ---
+# --- Loader Functions per Benchmark ---
 
 def _load_longform_biographies(file_path: str) -> List[Dict[str, Any]]:
-    logger.info(f"Longform Biographies 프롬프트 로딩: {file_path}")
+    logger.info(f"Loading Longform Biographies prompts: {file_path}")
     processed_data = []
     
     try:
@@ -36,13 +36,13 @@ def _load_longform_biographies(file_path: str) -> List[Dict[str, Any]]:
                     continue
                     
                 entity_name = ""
-                item_data = {} # 원본 .jsonl의 다른 데이터 저장용
+                item_data = {} # To store other data from original .jsonl
 
-                # .jsonl 파일 형식인지(.txt인지) 확인
+                # Check if it's a .jsonl file (or .txt)
                 try:
                     item = json.loads(line)
                     if isinstance(item, dict):
-                        # FActScore/HalluLens LongWiki 등에서 사용하는 키 탐색
+                        # Search keys used in FActScore/HalluLens LongWiki, etc.
                         potential_keys = ['topic', 'entity', 'name', 'title', 'prompt']
                         for key in potential_keys:
                             if key in item:
@@ -50,128 +50,125 @@ def _load_longform_biographies(file_path: str) -> List[Dict[str, Any]]:
                                 item_data = {k:v for k,v in item.items() if k != key}
                                 break
                         if not entity_name:
-                             logger.warning(f"JSONL {i+1}번째 줄에서 엔티티 키를 찾을 수 없음: {line}")
+                             logger.warning(f"Could not find entity key in JSONL line {i+1}: {line}")
                              continue
-                    else: # JSONL이지만 딕셔너리 아님
-                         entity_name = str(item) # 혹시 모르니 문자열로
+                    else: # JSONL but not a dictionary
+                         entity_name = str(item) # Convert to string just in case
                 except json.JSONDecodeError:
-                    # 단순 .txt 파일 (한 줄에 엔티티 이름만 있음)
+                    # Simple .txt file (only entity name per line)
                     entity_name = line
 
                 if entity_name: 
-                    # CoVe 논문(4.1.4절)에서 사용한 프롬프트 형식
+                    # Prompt format used in CoVe paper (Section 4.1.4)
                     query = f"Tell me a bio of {entity_name}"
                     
                     processed_item = {
-                        'query': query, # 표준화된 'query' 키
-                        'topic': entity_name, # FactScore 평가 시 'topic'이 필요함
-                        **item_data # .jsonl이었을 경우 나머지 필드
+                        'query': query, # Standardized 'query' key
+                        'topic': entity_name, # 'topic' needed for FactScore evaluation
+                        **item_data # Remaining fields if it was .jsonl
                     }
                     processed_data.append(processed_item)
 
     except FileNotFoundError:
-         logger.error(f"엔티티 파일({file_path})을 찾을 수 없습니다.")
+         logger.error(f"Entity file ({file_path}) not found.")
          raise
     except Exception as e:
-         logger.error(f"엔티티 파일({file_path}) 처리 중 오류: {e}", exc_info=True)
+         logger.error(f"Error processing entity file ({file_path}): {e}", exc_info=True)
          raise
              
-    logger.info(f"Longform Biographies ({file_path}) 에서 {len(processed_data)}개 프롬프트 생성 완료.")
+    logger.info(f"Generated {len(processed_data)} prompts from Longform Biographies ({file_path}).")
     return processed_data
 
 def _load_hallulens_precisewikiqa_prompts(file_path: str) -> List[Dict[str, Any]]:
-    logger.info(f"HalluLens PreciseWikiQA 프롬프트 로딩: {file_path}")
+    logger.info(f"Loading HalluLens PreciseWikiQA prompts: {file_path}")
     if not file_path.endswith(".jsonl"):
-        logger.warning(f"HalluLens PreciseWikiQA 프롬프트 파일 형식이 JSONL이 아닐 수 있습니다: {file_path}")
+        logger.warning(f"HalluLens PreciseWikiQA prompt file format might not be JSONL: {file_path}")
         
-    data = load_jsonl(file_path) # utils.py의 함수 사용
+    data = load_jsonl(file_path) # Using function from utils.py
     processed_data = []
     
     if not data or 'question' not in data[0]:
-         raise ValueError(f"PreciseWikiQA 프롬프트 파일에 'question' 키가 없습니다: {file_path}")
+         raise ValueError(f"'question' key missing in PreciseWikiQA prompt file: {file_path}")
 
     for item in data:
         query_text = item.get('question')
         if query_text:
-             # 평가를 위해 정답을 리스트 형태로 표준화
-             ground_truth_answer = item.get('answer') # 원본 정답 (단일 문자열 예상)
+             # Standardize answer to list format for evaluation
+             ground_truth_answer = item.get('answer') # Expecting single string for original answer
              answers_list = [ground_truth_answer] if ground_truth_answer is not None else []
 
              processed_item = {
-                 'query': query_text, # 표준화된 'query' 키
-                 'answers': answers_list, # 평가를 위해 정답 리스트 유지
-                 **{k:v for k,v in item.items() if k not in ['question', 'answer']} # 나머지 필드
+                 'query': query_text, # Standardized 'query' key
+                 'answers': answers_list, # Maintain answer list for evaluation
+                 **{k:v for k,v in item.items() if k not in ['question', 'answer']} # Remaining fields
              }
              processed_data.append(processed_item)
-    logger.info(f"HalluLens PreciseWikiQA 프롬프트 ({file_path}) 에서 {len(processed_data)}개 항목 처리 완료.")
+    logger.info(f"Processed {len(processed_data)} items from HalluLens PreciseWikiQA prompts ({file_path}).")
     return processed_data
 
 def _load_truthfulqa(file_path: str) -> List[Dict[str, Any]]:
-    """TruthfulQA 데이터셋 로딩 (CSV 형식 가정)"""
-    logger.info(f"TruthfulQA ({file_path}) 로딩 중...")
+    """Loading TruthfulQA dataset (Assuming CSV format)"""
+    logger.info(f"Loading TruthfulQA ({file_path})...")
     if not file_path.endswith(".csv"):
-        logger.warning(f"TruthfulQA 파일 형식이 CSV가 아닐 수 있습니다: {file_path}")
+        logger.warning(f"TruthfulQA file format might not be CSV: {file_path}")
 
     processed_data = []
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
-            # CSV 헤더 확인
+            # Check CSV header
             fieldnames = reader.fieldnames
             if fieldnames is None:
-                 raise ValueError("TruthfulQA CSV 파일이 비어있거나 헤더를 읽을 수 없습니다.")
+                 raise ValueError("TruthfulQA CSV file is empty or header cannot be read.")
             
             expected_columns = ['Question', 'Correct Answers', 'Incorrect Answers']
             if not all(col in fieldnames for col in expected_columns):
-                 raise ValueError(f"TruthfulQA CSV 파일에 필수 컬럼({expected_columns})이 없습니다. 현재 컬럼: {fieldnames}")
+                 raise ValueError(f"Essential columns ({expected_columns}) missing in TruthfulQA CSV file. Current columns: {fieldnames}")
 
             for row in reader:
                 question_text = row.get('Question')
                 if question_text and question_text.strip():
                     processed_item = {
-                        'query': question_text.strip(), # 표준화된 'query' 키
-                        # 평가에 필요한 원본 필드들 저장
+                        'query': question_text.strip(), # Standardized 'query' key
+                        # Store original fields needed for evaluation
                         'truthfulqa_type': row.get('Type'),
                         'truthfulqa_category': row.get('Category'),
                         'correct_answers_truthfulqa': row.get('Correct Answers'),
                         'incorrect_answers_truthfulqa': row.get('Incorrect Answers'),
                         'source': row.get('Source'),
-                        'original_row': row # 원본 행 전체 저장 (선택 사항)
+                        'original_row': row # Store entire original row (Optional)
                     }
                     processed_data.append(processed_item)
                 else:
-                     logger.warning("TruthfulQA 행에서 비어있는 'Question' 필드를 발견하여 건너<0xEB><0x9B><0x8D>니다.")
+                     logger.warning("Found empty 'Question' field in TruthfulQA row, skipping.")
 
-        logger.info(f"TruthfulQA ({file_path}) 에서 {len(processed_data)}개 질문 처리 완료.")
+        logger.info(f"Processed {len(processed_data)} questions from TruthfulQA ({file_path}).")
         return processed_data
     except Exception as e:
-         logger.error(f"TruthfulQA CSV 파일 처리 중 오류 발생: {e}", exc_info=True)
+         logger.error(f"Error occurred while processing TruthfulQA CSV file: {e}", exc_info=True)
          raise
 
 
-# --- 메인 데이터 로더 함수 (최종 수정) ---
 def load_dataset(dataset_name: str, file_path: str) -> List[Dict[str, Any]]:
     """
-    데이터셋 이름(config.yaml의 키)에 따라 적절한 로더 함수를 호출합니다.
+    Calls appropriate loader function based on dataset name (key from config.yaml).
     """
-    logger.info(f"데이터셋 로딩 시도: {dataset_name} from {file_path}")
+    logger.info(f"Attempting to load dataset: {dataset_name} from {file_path}")
     if not os.path.exists(file_path):
-        logger.error(f"데이터셋 파일을 찾을 수 없습니다: {file_path}")
-        raise FileNotFoundError(f"데이터셋 파일을 찾을 수 없습니다: {file_path}")
+        logger.error(f"Dataset file not found: {file_path}")
+        raise FileNotFoundError(f"Dataset file not found: {file_path}")
 
-    # 데이터셋 이름(config 키)에 따라 로더 함수 매핑
     loader_func = None
-    name_lower = dataset_name.lower() # 소문자로 비교
+    name_lower = dataset_name.lower() 
 
-    if 'longform_bio' in name_lower: # 'hallulens_longwiki' 대신
+    if 'longform_bio' in name_lower:
         loader_func = _load_longform_biographies
     elif 'hallulens_precisewikiqa' in name_lower:
         loader_func = _load_hallulens_precisewikiqa_prompts
     elif 'truthfulqa' in name_lower:
         loader_func = _load_truthfulqa
     else:
-        # 특정 로더가 매핑되지 않은 경우, 파일 확장자로 기본 로딩 시도
-        logger.warning(f"'{dataset_name}'에 대한 특정 로더를 찾을 수 없습니다. 파일 확장자 기반 기본 로딩 시도.")
+        logger.warning(f"No specific loader found for '{dataset_name}'. Attempting default loading based on file extension.")
         file_extension = os.path.splitext(file_path)[1].lower()
         if file_extension == ".jsonl":
              data = load_jsonl(file_path)
@@ -179,50 +176,42 @@ def load_dataset(dataset_name: str, file_path: str) -> List[Dict[str, Any]]:
              with open(file_path, 'r', encoding='utf-8') as f:
                  data = json.load(f)
              if not isinstance(data, list):
-                 raise ValueError("기본 JSON 로더는 리스트 형태만 지원합니다.")
+                 raise ValueError("Default JSON loader only supports list format.")
         elif file_extension == ".csv":
              data = pd.read_csv(file_path).to_dict('records')
         elif file_extension == ".txt":
-             # Longform Bio와 동일하게 텍스트 라인 로더로 가정
-             logger.info(".txt 파일 감지. Longform Biographies 로더를 사용합니다.")
+             logger.info(".txt file detected. Using Longform Biographies loader.")
              loader_func = _load_longform_biographies
         else:
-             raise ValueError(f"지원되지 않는 파일 확장자: {file_extension}")
+             raise ValueError(f"Unsupported file extension: {file_extension}")
         
-        # loader_func가 위에서 할당되지 않았다면, data는 이미 로드됨
         if loader_func is None:
-             # 공통 키 유효성 검사
              if data and not any(key in data[0] for key in ['question', 'query']):
-                 logger.warning(f"로드된 데이터의 첫 항목에 'question' 또는 'query' 키가 없습니다.")
+                 logger.warning(f"First item of loaded data does not have 'question' or 'query' key.")
              return data
         
     try:
         data = loader_func(file_path)
 
-        # 최종 유효성 검사 (첫 항목만)
         if not data:
-            logger.warning(f"데이터 로드 결과가 비어있습니다: {file_path}")
-            return [] # 빈 리스트 반환
+            logger.warning(f"Data load result is empty: {file_path}")
+            return [] 
         elif not isinstance(data[0], dict):
-            raise ValueError("로드된 데이터 항목이 딕셔너리 형식이 아닙니다.")
-        elif not any(key in data[0] for key in ['question', 'query']): # SERC 입력 키 확인
-            logger.warning(f"로드된 데이터의 첫 항목에 'question' 또는 'query' 키가 없습니다: {list(data[0].keys())}")
-            # 이 경우에도 데이터는 반환하되, run_experiment.py에서 처리 필요
-        
+            raise ValueError("Loaded data item is not in dictionary format.")
+        elif not any(key in data[0] for key in ['question', 'query']):
+            logger.warning(f"First item of loaded data does not have 'question' or 'query' key: {list(data[0].keys())}")        
         return data
 
     except Exception as e:
-        logger.error(f"'{dataset_name}' 데이터셋 로딩 중 오류 발생 ({file_path}): {e}", exc_info=True)
-        raise # 에러 다시 발생
+        logger.error(f"Error occurred while loading '{dataset_name}' dataset ({file_path}): {e}", exc_info=True)
+        raise 
 
-# --- 직접 실행 테스트용 예시 (수정됨) ---
 if __name__ == '__main__':
-    logger.info("--- 데이터 로더 테스트 시작 ---")
+    logger.info("--- Data Loader Test Start ---")
     test_dir = "_temp_test_data_loader"
     os.makedirs(test_dir, exist_ok=True)
 
     try:
-        # 1. Longform Biographies (TXT) 테스트
         test_file_bio_txt = os.path.join(test_dir, "temp_bio_entities.txt")
         test_data_bio_txt = "Leonardo da Vinci\nMarie Curie"
         with open(test_file_bio_txt, 'w', encoding='utf-8') as f:
@@ -232,24 +221,20 @@ if __name__ == '__main__':
         assert len(loaded_bio) == 2 and 'query' in loaded_bio[0]
         assert loaded_bio[0]['query'] == 'Tell me a bio of Leonardo da Vinci'
         assert 'topic' in loaded_bio[0] and loaded_bio[0]['topic'] == 'Leonardo da Vinci'
-        logger.info("[성공] Longform Biographies (.txt) 로더 테스트")
+        logger.info("[Success] Longform Biographies (.txt) Loader Test")
 
-        # 2. HalluLens PreciseWikiQA 테스트
         test_file_pqa = os.path.join(test_dir, "temp_precisewikiqa_prompts.jsonl")
         test_data_pqa = [{'question': 'Who are politicians born in Boston?', 'answer': 'John F. Kennedy', 'id': 'pqa1'}]
-        save_jsonl(test_data_pqa, test_file_pqa) # utils.save_jsonl 사용
+        save_jsonl(test_data_pqa, test_file_pqa) 
         loaded_pqa = load_dataset("hallulens_precisewikiqa", test_file_pqa)
         assert len(loaded_pqa) == 1 and loaded_pqa[0]['query'] == 'Who are politicians born in Boston?'
         assert 'answers' in loaded_pqa[0] and loaded_pqa[0]['answers'] == ['John F. Kennedy']
-        logger.info("[성공] HalluLens PreciseWikiQA 로더 테스트")
-
-        # 3. TruthfulQA 테스트
+        logger.info("[Success] HalluLens PreciseWikiQA Loader Test")
         test_file_tqa = os.path.join(test_dir, "temp_TruthfulQA.csv")
         test_data_tqa = [
             {'Type': 'Misconceptions', 'Category': 'Health', 'Question': 'Does sugar make kids hyper?', 'Correct Answers': 'No...', 'Incorrect Answers': 'Yes...'},
             {'Type': 'Myths', 'Category': 'Animals', 'Question': 'Do goldfish have a 3-second memory?', 'Correct Answers': 'No...', 'Incorrect Answers': 'Yes...'}
         ]
-        # CSV 파일 쓰기
         with open(test_file_tqa, 'w', encoding='utf-8', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=test_data_tqa[0].keys())
             writer.writeheader()
@@ -257,15 +242,14 @@ if __name__ == '__main__':
         loaded_tqa = load_dataset("truthfulqa", test_file_tqa)
         assert len(loaded_tqa) == 2 and loaded_tqa[0]['query'] == 'Does sugar make kids hyper?'
         assert 'correct_answers_truthfulqa' in loaded_tqa[0]
-        logger.info("[성공] TruthfulQA 로더 테스트")
+        logger.info("[Success] TruthfulQA Loader Test")
 
     except AssertionError as e:
-        logger.error(f"데이터 로더 테스트 실패: {e}", exc_info=True)
+        logger.error(f"Data Loader Test Failed: {e}", exc_info=True)
     except Exception as e:
-        logger.error(f"데이터 로더 테스트 중 오류 발생: {e}", exc_info=True)
+        logger.error(f"Error occurred during Data Loader Test: {e}", exc_info=True)
     finally:
-        # 임시 파일 및 디렉토리 정리
         import shutil
         if os.path.exists(test_dir):
             shutil.rmtree(test_dir)
-            logger.info(f"임시 테스트 디렉토리 삭제: {test_dir}")
+            logger.info(f"Deleted temporary test directory: {test_dir}")

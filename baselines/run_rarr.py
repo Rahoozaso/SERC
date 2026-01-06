@@ -6,25 +6,20 @@ import re
 from typing import Dict, Any, List, Optional
 from tqdm import tqdm
 import traceback
-
-# --- [1] 프로젝트 경로 설정 ---
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(PROJECT_ROOT)
 sys.path.append(os.path.join(PROJECT_ROOT, "src")) 
 
 try:
     from src.model_wrappers import generate
-    from src import prompts
+    from src.prompts import (BASELINE_PROMPT_TEMPLATE_PN)
     from src.utils import load_config, save_jsonl, get_timestamp, token_tracker
     from src.data_loader import load_dataset
     from src.rag_retriever import RAGRetriever
-    from src.main_serc import prompt_baseline 
 
 except ImportError:
     logging.error("--- ImportError Traceback ---")
     logging.error(traceback.format_exc())
-    # 로컬 테스트를 위해 src가 없을 경우를 대비한 Mock 객체 (실제 구동 시 제거 가능)
-    # sys.exit(1) 
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -32,7 +27,6 @@ logger = logging.getLogger(__name__)
 
 # --- [2] RARR Prompts (Based on Appendix D of the paper) ---
 
-# [cite: 881] Figure 13: Query Generation Prompt
 RARR_QUERY_GEN_TEMPLATE = """[web] I will check things you said and ask questions.
 
 (1) You said: Your nose switches back and forth between nostrils. When you sleep, you switch about every 45 minutes. This is to prevent a buildup of mucus. It's called the nasal cycle.
@@ -48,7 +42,6 @@ a) I googled: Where was Stanford Prison Experiment was conducted?
 (3) You said: {text}
 To verify it,"""
 
-# [cite: 948] Figure 14: Agreement Model Prompt
 RARR_AGREEMENT_TEMPLATE = """[web] I will check some things you said.
 
 (1) You said: Your nose switches back and forth between nostrils. When you sleep, you switch about every 45 minutes. This is to prevent a buildup of mucus. It's called the nasal cycle.
@@ -68,7 +61,6 @@ I checked: {query}
 I found this article: {evidence}
 """
 
-# [cite: 1048] Figure 15: Edit Model Prompt
 RARR_EDIT_TEMPLATE = """[web] I will fix some things you said.
 
 (1) You said: Your nose switches back and forth between nostrils. When you sleep, you switch about every 45 minutes. This is to prevent a buildup of mucus. It's called the nasal cycle.
@@ -82,30 +74,33 @@ I checked: {query}
 I found this article: {evidence}
 This suggests"""
 
-# --- [3] RARR Helper Functions ---
+
+def prompt_baseline(query: str, model_name: str, config: dict) -> str:
+    prompt = BASELINE_PROMPT_TEMPLATE_PN.format(query=query)
+    return generate(prompt, model_name, config)
 
 def _parse_rarr_questions(text: str) -> List[str]:
-    """RARR Step 1: 생성된 검색 쿼리 파싱"""
+    """RARR Step 1: Parse generated search queries"""
     lines = text.strip().splitlines()
     questions = []
     for line in lines:
-        # a) I googled: ... 패턴 매칭
+        # Match pattern: a) I googled: ...
         match = re.search(r"^[a-z]\)\s*I googled:\s*(.*)", line, re.IGNORECASE)
         if match:
             questions.append(match.group(1).strip())
-    # 매칭 실패 시 fallback (단순 라인 분리)
+    # Fallback on failure (simple line split)
     if not questions:
         questions = [line.strip() for line in lines if '?' in line]
     return questions
 
 def _check_agreement(model_output: str) -> bool:
-    """RARR Step 2: Agreement 모델의 출력 분석"""
+    """RARR Step 2: Analyze output from Agreement Model"""
     if "disagrees with what you said" in model_output.lower():
         return False
     return True
 
 def _parse_edit_output(model_output: str) -> str:
-    """RARR Step 3: Edit 모델의 출력에서 수정된 텍스트 추출"""
+    """RARR Step 3: Extract edited text from Edit Model output"""
     match = re.search(r"My fix:\s*(.*)", model_output, re.IGNORECASE | re.DOTALL)
     if match:
         return match.group(1).strip()
@@ -144,7 +139,7 @@ def run_rarr(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, A
         
         history['generated_queries'] = questions
         
-        # Retrieve evidence for each query [cite: 165]
+        # Retrieve evidence for each query
         evidence_pairs = []
         for q in questions:
             retrieved_docs = retriever.retrieve(q) # Assuming this returns a string or list of strings
@@ -154,7 +149,7 @@ def run_rarr(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, A
         history['evidence_pairs'] = evidence_pairs
 
         # --- Stage 2 & 3: Revision (Agreement & Edit Loop) ---
-        # Iterate through evidence and revise [cite: 176]
+        # Iterate through evidence and revise
         logging.info("  [RARR 2/3 & 3/3] Agreement Check & Revision Loop...")
         
         revisions = []
@@ -182,7 +177,7 @@ def run_rarr(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, A
                 'is_agreed': is_agreed
             }
 
-            # 2.2 Edit Model (if disagreement detected) [cite: 183]
+            # 2.2 Edit Model (if disagreement detected)
             if not is_agreed:
                 logging.info(f"    Disagreement detected at step {i}. Revising...")
                 edit_prompt = RARR_EDIT_TEMPLATE.format(
@@ -193,7 +188,7 @@ def run_rarr(query: str, model_name: str, config: Dict[str, Any]) -> Dict[str, A
                 edit_output_raw = generate(edit_prompt, model_name, config)
                 revised_text = _parse_edit_output(edit_output_raw)
                 
-                # Update current response for next iteration [cite: 178]
+                # Update current response for next iteration
                 current_response = revised_text
                 
                 step_record['edit_output_raw'] = edit_output_raw
@@ -270,17 +265,17 @@ def main():
     logging.info(f"--- RARR Experiment Start ---")
     logging.info(f"Dataset: {args.dataset} | Model: {args.model}")
 
-    # 데이터셋 로드
+    # Load Dataset
     dataset_path = os.path.join(PROJECT_ROOT, config['data_paths'][args.dataset])
     data = load_dataset(args.dataset, dataset_path)
     
     if not data: return
 
-    # 슬라이싱
+    # Slicing
     end_idx = args.end if args.end is not None else len(data)
     data = data[args.start : end_idx]
 
-    # 경로 설정
+    # Path Setup
     timestamp = get_timestamp()
     results_dir = os.path.join(PROJECT_ROOT, args.output_dir, args.model.replace('/', '_'), args.dataset)
     os.makedirs(results_dir, exist_ok=True)
