@@ -550,15 +550,15 @@ You must output the result in valid JSON format only. Do not add any conversatio
 
 RECONSTRUCT_LOCAL_SENTENCE_TEMPLATE = """
 <instruction>
-You are a **Strict Fact-Based Writer**.
-Your task is to construct a natural, coherent sentence using **ONLY** the information provided in the <verified_facts> section below.
+You are an expert editor aiming for **Semantic Consistency**.
+Your task is to reconstruct the current sentence based on the provided <verified_facts>, ensuring it **logically follows** and **naturally flows** from the <previous_context>.
 </instruction>
 
 <critical_rules>
-1. **ABSOLUTE PRIORITY**: The information in <verified_facts> is the **ONLY SOURCE OF TRUTH**.
-2. **NO HALLUCINATION**: Do not add names, dates, or titles not explicitly listed.
-3. **NO META-COMMENTARY**: Do not output comments, notes, explanations, or "Incorrect examples". 
-4. **SINGLE OUTPUT**: Write the sentence ONCE and stop immediately.
+1. **FACTUALITY**: Use **ONLY** the information in <verified_facts>. Do not hallucinate external details.
+2. **FLOW & COHERENCE**: The sentence must be a natural continuation of the <previous_context>. Maintain the tone and narrative style.
+3. **LOGIC PROPAGATION**: If the facts in the current sentence have changed, ensure the terminology and context align with these changes.
+4. **NO META-COMMENTARY**: Do not explain your changes. Just output the sentence.
 </critical_rules>
 
 <previous_context>
@@ -570,7 +570,7 @@ Your task is to construct a natural, coherent sentence using **ONLY** the inform
 </verified_facts>
 
 <output_format>
-Output strictly the sentence content inside the tags.
+Output strictly the reconstructed sentence inside the tags.
 </output_format>
 
 <generated_sentence>
