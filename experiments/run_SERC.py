@@ -158,8 +158,8 @@ def _prompt_generate_question_for_sentence_group(facts: List[str], model_name: s
     return q if q else f"{_clean_model_output(raw)} {main_subject}"
 
 def _prompt_get_verification_answer(question: str, model_name: str, config: dict, context: str) -> str:
-    prompt = VERIFICATION_ANSWER_TEMPLATE_RAG.format(query=question, context=context,generation_params_override={"temperature": 0.1, "max_new_tokens": 512})
-    raw = generate(prompt, model_name, config,generation_params_override={"max_new_tokens": 400, "temperature": 0.1})
+    prompt = VERIFICATION_ANSWER_TEMPLATE_RAG.format(query=question, context=context,generation_params_override={"temperature": 0.0, "max_new_tokens": 512})
+    raw = generate(prompt, model_name, config,generation_params_override={"max_new_tokens": 400, "temperature": 0.0})
     return _clean_model_output(raw)
 
 def prompt_validate_one_fact_against_evidence(fact: str, evidence: str, model_name: str, config: dict) -> str:
@@ -271,11 +271,7 @@ def _correct_syndromes_batch(syndromes_buffer: List[Dict],
         
 
         prompt_with_prefill = prompt.strip() + "\n<correction>"
-        raw_output_fragment = generate(prompt_with_prefill, model_name, config, 
-                                       generation_params_override={
-                                           "max_new_tokens": 256, 
-                                           "temperature": 0.1,
-                                       })
+        raw_output_fragment = generate(prompt_with_prefill, model_name, config)
         
         raw_output = "<correction>" + raw_output_fragment
         correction_blocks = re.findall(r"<correction>(.*?)</correction>", raw_output, re.DOTALL | re.IGNORECASE)
