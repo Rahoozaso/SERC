@@ -163,7 +163,6 @@ CRITICAL RULES:
 ```
 **Entity Extraction (RAG Context)**
 ```Plaintext
-
 [INSTRUCTION] You are a fact-checker. Read the [SEARCH RESULTS] about the [QUERY].
 Identify the main subject's Proper Noun (Name) and its single most dominant Characteristic.
 Respond ONLY in "Name (Characteristic)" format.
@@ -174,7 +173,6 @@ Respond ONLY in "Name (Characteristic)" format.
 ```
 **Entity Consistency Judge**
 ```Plaintext
-
 [INSTRUCTION] Determine if [DESCRIPTION 1] and [DESCRIPTION 2] refer to the SAME entity.
 - Ignore minor spelling differences.
 - Focus on core attributes (profession, era, origin).
@@ -188,7 +186,6 @@ Respond ONLY in "Name (Characteristic)" format.
 ```
 **RAG-First Baseline Generation (Hard Reset)**
 ```Plaintext
-
 [INSTRUCTION] Answer the user's question using ONLY the provided context.
 
 [CONTEXT] {context}
@@ -200,7 +197,6 @@ Used to decompose the generated text into atomic units for the Tanner Graph init
 
 **Atomic Fact Extraction**
 ```Plaintext
-
 [INSTRUCTION] Break down the [SENTENCE] into Atomic Facts about [{main_subject}].
 1. Minimum Unit Rule: Each fact MUST contain a complete Subject-Verb-Object (SVO) structure.
 2. Cohesion Rule: A fact should be separated ONLY IF it introduces a new person, new time period, or a new main action.
@@ -216,7 +212,6 @@ These prompts generate sparse verification queries and evaluate the validity of 
 
 **Group Query Generation (Low-Density)**
 ```Plaintext
-
 [INSTRUCTION] You are an expert Google Search Query Generator.
 Your goal is to generate ONE single, comprehensive search query that can verify ALL the provided [FACTS] simultaneously.
 STRATEGY:
@@ -229,7 +224,6 @@ STRATEGY:
 ```
 **Syndrome Detection (Verdict)**
 ```Plaintext
-
 [INSTRUCTION] Compare the [CLAIM] against the [EVIDENCE]. Act as a Strict Fact Checker.
 [JUDGMENT RULES]
 1. SUPPORTED: The evidence actively confirms the claim.
@@ -244,7 +238,6 @@ STRATEGY:
 ### 4. Correction & Reconstruction
 **BP Correction (Logic Propagation)**
 ```Plaintext
-
 [INSTRUCTION] You are a Strict Fact Corrector. Correct the [ERROR FACTS] based ONLY on the [VERIFIED EVIDENCE].
 CRITICAL RULES:
 1. EXACT COPY: The content inside <original> MUST be a word-for-word copy of the error.
@@ -257,7 +250,6 @@ CRITICAL RULES:
 ```
 **Local Sentence Reconstruction**
 ```Plaintext
-
 [INSTRUCTION] You are a Strict Fact-Based Writer.
 Construct a natural, coherent sentence using ONLY the information in <verified_facts>.
 CRITICAL RULES:
@@ -271,7 +263,6 @@ CRITICAL RULES:
 ```
 **Global Polishing**
 ```Plaintext
-
 [INSTRUCTION] You are a final proofreader. Smooth out transitions to make the text read as a single coherent answer.
 [GUIDELINES]
 - Use transition words ONLY if logic supports it.
@@ -439,7 +430,6 @@ Sub-Questions:
 
 **Step 2: Factual Error Explanation**
 ```Plaintext
-
 [INSTRUCTION] You will receive an initial response along with a prompt. Your goal is to refine and enhance this response, ensuring its factual accuracy.
 Check for any factually inaccurate information in the initial response.
 Use the provided sub-questions and corresponding answers as key resources in this process.
@@ -458,7 +448,6 @@ Factual Errors:
 ```
 **Step 3: Final Revision**
 ```Plaintext
-
 [INSTRUCTION] You will receive an initial response along with a prompt. Your goal is to refine and enhance this response, ensuring its factual accuracy.
 You will receive a list of factual errors in the initial response from the previous step. Use this explanation of each factual error as a key resource in this process.
 
@@ -475,7 +464,6 @@ CoVe generates a verification plan, executes it, and synthesizes a final respons
 
 **Verification Planning (Few-Shot)**
 ```Plaintext
-
 [INSTRUCTION] Your goal is to verify the factual accuracy of the 'Initial Response'.
 Read the 'Initial Response' and generate a list of Verification Questions needed to check its factuality in the context of the 'Original Question'.
 Each question should verify a specific fact (e.g., person, place, date, statistic, claim).
@@ -497,7 +485,6 @@ How many Nobel Prizes did Marie Curie win?
 ```
 **Verification Execution (RAG-Based)**
 ```Plaintext
-
 [INSTRUCTION] Answer the [QUESTION] using ONLY the [CONTEXT DOCUMENTS].
 Be concise and factual.
 
@@ -507,7 +494,6 @@ Be concise and factual.
 ```
 **Final Revision (Synthesizing Evidence)**
 ```Plaintext
-
 [INSTRUCTION] You must synthesize a final, verified response.
 You are given an 'Initial Response' and 'Verification Results' (which you should treat as facts from "another source").
 Write a new, revised response that only includes facts that are consistent between both sources.
@@ -524,7 +510,6 @@ RARR utilizes a few-shot prompting strategy to edit the text based on search res
 
 **Query Generation (Few-Shot)**
 ```Plaintext
-
 [web] I will check things you said and ask questions.
 
 (1) You said: Your nose switches back and forth between nostrils. When you sleep, you switch about every 45 minutes...
@@ -542,7 +527,6 @@ To verify it,
 ```
 **Agreement Check (Few-Shot)**
 ```Plaintext
-
 [web] I will check some things you said.
 
 (1) You said: Your nose switches back and forth between nostrils... switch about every 45 minutes...
@@ -563,7 +547,6 @@ I found this article: {evidence}
 ```
 **Editing / Revision (Few-Shot)**
 ```Plaintext
-
 [web] I will fix some things you said.
 
 (1) You said: Your nose switches back and forth between nostrils... switch about every 45 minutes...
