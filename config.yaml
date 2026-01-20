@@ -9,6 +9,18 @@ default_generation_params:
 
 # --- Models to Use in Experiments ---
 models:
+  - name: "gpt-5.1"
+    provider: "openai"
+    generation_params:
+      temperature: 0.0
+      max_new_tokens: 2048
+
+  - name: "gemini-3-pro-preview"
+    provider: "google"
+    generation_params:
+      temperature: 0.0
+      max_new_tokens: 2048
+      
   - name: "dummy-model" # Dummy model for testing
     provider: "dummy"
 
