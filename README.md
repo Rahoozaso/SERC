@@ -141,9 +141,6 @@ python experiments/run_dense.py --model "..." --dataset "..."
 
 Results are saved as `.jsonl` files in the `results/` directory. You can parse these logs directly to calculate metrics or verify the output.
 
-##  Contact
-For any questions, please contact **Gyumin Kim** via rhzs1208@hufs.ac.kr or open an issue.
-
 ## 📝 Prompt Templates
 To ensure full reproducibility, we provide the complete set of prompt templates used in the SERC framework.
 
@@ -625,3 +622,6 @@ To facilitate full reproducibility, we detail the specific hyperparameters and e
 | **SERC Specifics**                                                       |
 | Fact Extraction Granularity  | Atomic Facts (SVO triplets)               |
 | Verification Batch Size      | Sentence-level grouping                   |
+
+##  Contact
+For any questions, please contact **Gyumin Kim** via rhzs1208@hufs.ac.kr or open an issue.
