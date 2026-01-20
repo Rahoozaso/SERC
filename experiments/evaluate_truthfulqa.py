@@ -173,7 +173,7 @@ def main():
 
     config = load_config(args.config)
     if args.evaluator_model:
-        print(f"🔄 Overriding evaluator model: {config.get('evaluator_model_name')} -> {args.evaluator_model}")
+        print(f"Overriding evaluator model: {config.get('evaluator_model_name')} -> {args.evaluator_model}")
         config['evaluator_model_name'] = args.evaluator_model
 
     try:
