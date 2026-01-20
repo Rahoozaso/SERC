@@ -38,8 +38,8 @@ def extract_responses(item: Dict[str, Any]) -> Tuple[str, str]:
     return baseline_text, final_text
 
 def evaluate_truthfulqa(results_data: List[Dict[str, Any]], config: Dict[str, Any], target: str = "all", output_path: str = None) -> Dict[str, Any]:
-    logger.info(f"TruthfulQA evaluation started (Target: {target.upper()})...")
     evaluator_model = config.get('evaluator_model_name')
+    logger.info(f"TruthfulQA evaluation started (Target: {target.upper()}, Model: {evaluator_model})...")
     
     # --- Function to return the entire evaluation result ---
     def evaluate_single_response(query, correct, incorrect, pred_text, label="Response"):
@@ -51,7 +51,7 @@ def evaluate_truthfulqa(results_data: List[Dict[str, Any]], config: Dict[str, An
                 query=query, correct_answers_str=correct, incorrect_answers_str=incorrect, prediction=pred_text
             )
             
-            # Call Gemini (evaluate_generate internally includes Retry logic)
+            # Call Gemini/GPT (evaluate_generate internally includes Retry logic)
             judgment = evaluate_generate(prompt, evaluator_model, config, {"temperature": 0.0, "max_new_tokens": 8192, "response_mime_type": "application/json"})
 
             # JSON Parsing
@@ -151,26 +151,31 @@ def evaluate_truthfulqa(results_data: List[Dict[str, Any]], config: Dict[str, An
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--results_file", required=True)
+    parser.add_argument("--results_file", required=True, help="Path to the JSONL results file to evaluate")
     parser.add_argument("--config", default=os.path.join(PROJECT_ROOT, "config.yaml"))
     parser.add_argument("--target", default="all", choices=["baseline", "final", "all"])
     parser.add_argument("--output_file", default="eval_results", help="Base filename prefix (e.g., eval_results)")
+    parser.add_argument("--evaluator_model", type=str, default=None, 
+                        help="Override evaluator model defined in config (e.g., gpt-5.1, gemini-3-pro-preview)")
+    
     args = parser.parse_args()
 
-
     input_dir = os.path.dirname(args.results_file)
-    
     input_basename = os.path.basename(args.results_file)
     input_name_no_ext = os.path.splitext(input_basename)[0]
     output_prefix = os.path.basename(args.output_file)
     output_prefix_no_ext = os.path.splitext(output_prefix)[0]
-    
+    model_suffix = f"_{args.evaluator_model}" if args.evaluator_model else ""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    final_filename = f"{output_prefix_no_ext}_{input_name_no_ext}_{timestamp}.jsonl"
+    final_filename = f"{output_prefix_no_ext}_{input_name_no_ext}{model_suffix}_{timestamp}.jsonl"
     
     final_output_path = os.path.join(input_dir, final_filename)
 
     config = load_config(args.config)
+    if args.evaluator_model:
+        print(f"🔄 Overriding evaluator model: {config.get('evaluator_model_name')} -> {args.evaluator_model}")
+        config['evaluator_model_name'] = args.evaluator_model
+
     try:
         from dotenv import load_dotenv
         load_dotenv(os.path.join(PROJECT_ROOT, '.env'))
@@ -185,6 +190,7 @@ def main():
     metrics = evaluate_truthfulqa(results_data, config, args.target, final_output_path)
     
     print(f"\n=== TruthfulQA Evaluation Report ({args.target.upper()}) ===")
+    print(f"Evaluator: {config.get('evaluator_model_name')}") # 현재 사용된 평가자 출력
     if "error" in metrics:
         print(f"Error: {metrics['error']}")
     else:
