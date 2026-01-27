@@ -3,30 +3,38 @@
 <div align="center">
 </div>
 
-> **Abstract:** This repository contains the official implementation of **SERC** (Semantic Error-Reduction and Correction). SERC addresses LLM hallucinations by re-conceptualizing text generation as a transmission process over a *Semantic Noisy Channel*. Inspired by Error Correcting Codes (ECC) and LDPC codes, it employs a sparse verification strategy to detect and correct errors using Retrieval-Augmented Generation (RAG).
-
+> **Abstract:** This repository contains the official implementation of **SERC** (Semantic Error-Reduction and Correction). SERC addresses LLM hallucinations by re-conceptualizing text generation as a transmission process over a *Semantic Noisy Channel*. Inspired by Low-Density Parity-Check (LDPC) codes, it constructs a **Tanner Graph** of atomic facts to perform sparse verification.
+>
+> The framework operates through a novel 4-stage pipeline: (1) **Entity Firewall** to prevent topic drift, (2) **Fact Decomposition** for granular analysis, (3) **Low-Density Verification** for efficient error detection, and (4) **Back-Propagation (BP) Correction** to rectify errors while maintaining narrative coherence. Experiments on Llama-3 and Qwen2.5 demonstrate that SERC achieves an average **26.2% improvement** in factual precision compared to standard RAG and existing self-correction baselines.
 ## 📂 Project Structure
 ```text
 .
 ├── .env                    # API Keys (OpenAI, Tavily, Google, etc.)
 ├── config.yaml             # Main configuration file (Models, Data paths)
 ├── environment.yml         # Conda environment setup
+├── .gitignore              # Git ignore configuration (Files to exclude from version control)
 ├── baselines/              # Baseline implementations
 │   ├── run_cove.py         # CoVe (No-RAG)
 │   ├── run_cove_rag.py     # CoVe + RAG
 │   ├── run_rarr.py         # RARR
 │   └── run_re_ex.py        # Re-Ex
-├── experiments/            # Main SERC experiments & Ablations
+├── experiments/            # Main SERC experiments & Evaluations
 │   ├── run_SERC.py         # Main Framework (Proposed)
 │   ├── run_dense.py        # Ablation: High-Density Verification
 │   ├── run_no_firewall.py  # Ablation: Without Entity Firewall
-│   └── run_no_rag.py       # Ablation: Self-Correction (No RAG)
+│   ├── run_no_rag.py       # Ablation: Self-Correction (No RAG)
+│   └── evaluate_truthfulqa.py # TruthfulQA Evaluation Script
 ├── src/                    # Source code
-│   ├── rag_retriever.py    # RAG Logic (Tavily/Google)
+│   ├── data_loader.py      # Dataset Loading Logic (Bio, TruthfulQA, etc.)
 │   ├── model_wrappers.py   # LLM Generation Wrappers
-│   └── prompts.py          # Prompt Templates
-├── data/                   # Dataset directory
-└── notebooks/              # Analysis notebooks
+│   ├── programmatic_helpers.py # Text Processing & Parsing Helpers
+│   ├── prompts.py          # Prompt Templates
+│   ├── rag_retriever.py    # RAG Logic (Tavily/Google)
+│   └── utils.py            # I/O, Config, & Logging Utilities
+└── data/                   # Dataset directory
+    └── processed/          # Processed Benchmark Data
+        ├── factscore_bio_entities.txt  # Longform Biographies entities
+        └── TruthfulQA.csv              # TruthfulQA dataset
 ```
 
 ## ⚡ Quick Start
@@ -138,6 +146,10 @@ python experiments/run_dense.py --model "..." --dataset "..."
 ```
 
 ## 📊 Evaluation
+
+We utilize two primary benchmarks to evaluate hallucination mitigation:
+1. **TruthfulQA:** Measures the model's ability to avoid common misconceptions (Generic/Generation Task).
+2. **FActScore (Longform Biographies):** Evaluates atomic factual precision in generated biographies (Knowledge-Intensive Task).
 
 Results are saved as `.jsonl` files in the `results/` directory. You can parse these logs directly to calculate metrics or verify the output.
 
@@ -622,6 +634,20 @@ To facilitate full reproducibility, we detail the specific hyperparameters and e
 | **SERC Specifics**                                                       |
 | Fact Extraction Granularity  | Atomic Facts (SVO triplets)               |
 | Verification Batch Size      | Sentence-level grouping                   |
+## 📂 Datasets & Licenses
 
+This project utilizes the following open-source datasets. We thank the original authors for their contributions.
+
+### 1. TruthfulQA
+* **Source**: [TruthfulQA GitHub Repository](https://github.com/sylinrl/TruthfulQA)
+* **License**: [Apache License 2.0](https://github.com/sylinrl/TruthfulQA/blob/main/LICENSE)
+* **Description**: A benchmark to measure whether a language model is truthful in generating answers to questions.
+* **Copyright**: Copyright (c) TruthfulQA Authors.
+
+### 2. FActScore (Longform Biographies)
+* **Source**: [FActScore GitHub Repository](https://github.com/shmsw25/FActScore)
+* **License**: [MIT License](https://github.com/shmsw25/FActScore/blob/main/LICENSE)
+* **Description**: Fine-grained Atomic Evaluation of Factual Precision in Long Form Text Generation.
+* **Copyright**: Copyright (c) 2023 Sewon Min et al.
 ##  Contact
 For any questions, please contact **Gyumin Kim** via rhzs1208@hufs.ac.kr or open an issue.
