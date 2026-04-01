@@ -1,11 +1,31 @@
-# SERC: Semantic Error-Reduction and Correction Framework
-
 <div align="center">
+
+# SERC: LDPC-Inspired Semantic Error Correction <br> for Retrieval-Augmented Generation
+
+[![ICPR - 2026](https://img.shields.io/badge/ICPR-2026-278ea5?style=flat-square)](#)
+[![Python - 3.8+](https://img.shields.io/badge/Python-3.8+-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
+[![License - MIT](https://img.shields.io/badge/License-MIT-F7DF1E?style=flat-square&logo=open-source-initiative&logoColor=black)](https://opensource.org/licenses/MIT)
+
+**Official Implementation** of the paper accepted at **ICPR 2026**.
+
+[📄 Paper (Coming Soon)](#) • [🚀 Quick Start](#-quick-start)
+
 </div>
 
-> **Abstract:** This repository contains the official implementation of **SERC** (Semantic Error-Reduction and Correction). SERC addresses LLM hallucinations by re-conceptualizing text generation as a transmission process over a *Semantic Noisy Channel*. Inspired by Low-Density Parity-Check (LDPC) codes, it constructs a **Tanner Graph** of atomic facts to perform sparse verification.
+---
+
+## 🔥 News
+- **`2026.04`** 🎉 Our paper has been accepted to **ICPR 2026**!
+- **`2026.01`** Repository and evaluation codes released.
+
+<br>
+
+> **Abstract:** While Large Language Models (LLMs) have demonstrated remarkable capabilities, their reliability is significantly compromised by hallucinations. Existing intrinsic self-correction methods attempt to address this, but often fail due to **self-bias**, where models struggle to identify errors in their own outputs without external verification. To overcome these limitations, we propose the LDPC-inspired semantic error correction for retrieval-augmented generation (**SERC**), providing a theoretical framework to interpret and mitigate LLM hallucinations.
 >
-> The framework operates through a novel 4-stage pipeline: (1) **Entity Firewall** to prevent topic drift, (2) **Fact Decomposition** for granular analysis, (3) **Low-Density Verification** for efficient error detection, and (4) **Back-Propagation (BP) Correction** to rectify errors while maintaining narrative coherence. Experiments on Llama-3 and Qwen2.5 demonstrate that SERC achieves an average **26.2% improvement** in factual precision compared to standard RAG and existing self-correction baselines.
+> We reformulate the text generation process as a **Semantic Noisy Channel**, treating generated responses as noise-corrupted codewords. Inspired by Low-Density Parity-Check (LDPC) codes, SERC employs a **sparse verification strategy**: instead of exhaustively checking all facts, it generates low-density verification queries and validates them against external evidence to efficiently detect and correct errors. 
+>
+> We evaluate SERC on LongForm Bio and TruthfulQA benchmarks using Llama-3-8B and Qwen2.5-14B. Experimental results demonstrate that SERC outperforms both intrinsic self-correction methods and strong retrieval-augmented baselines, demonstrating significant gains especially in factual precision (FactScore). Notably, SERC enables **Small Language Models (SLMs)** to surpass the performance of larger baselines in hallucination reduction and information preservation. Our findings demonstrate that SERC provides a **training-free, model-agnostic solution** that significantly reduces verification overhead compared to dense methods, achieving an optimal trade-off between cost and fidelity in resource-constrained environments.
+
 ## 📂 Project Structure
 ```text
 .
